@@ -3,7 +3,7 @@ cmake_minimum_required(VERSION 3.10 FATAL_ERROR)
 project(RawInputTest)
 
 find_package(Vulkan 1.1 REQUIRED)
-find_package(glm REQUIRED)
+add_subdirectory(ext/glm build/ext/glm EXCLUDE_FROM_ALL)
 
 set(headers
     src/aligned_alloc.hpp
