@@ -20,7 +20,7 @@
 #include <utility>
 
 #include <vulkan/vulkan.h>
-#include "vulkan_tools.hpp"
+#include "vulkan_utils.hpp"
 
 #pragma warning(push)
 #pragma warning(disable : 4201)
