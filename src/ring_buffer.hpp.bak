@@ -1,0 +1,244 @@
+#pragma once
+
+#include <atomic>
+#include "types.hpp"
+
+template<size_t size_log2>
+struct ring_buffer {
+private:
+    static const ptrdiff_t buffer_size = ptrdiff_t(1) << size_log2;
+    static const ptrdiff_t index_mask = buffer_size - 1;
+
+public:
+    static const size_t align = 64u;
+
+    // Note:
+    // Two produce transactions can overlap, but must be committed/aborted
+    // in the order they were started in. The same applies to consume transactions.
+    // Merging of transactions leads to undefined behavior.
+
+    struct transaction {
+        void* storage() {
+            return _storage;
+        }
+
+        ptrdiff_t size() {
+            return _size;
+        }
+
+        transaction(transaction&& other) {
+            _storage = other._storage;
+            _size = other._size;
+
+            other._storage = nullptr;
+            other._size = 0;
+        }
+
+        transaction& operator=(transaction&& other) {
+            _storage = other._storage;
+            _size = other._size;
+
+            other._storage = nullptr;
+            other._size = 0;
+        }
+
+        ~transaction() = default;
+
+    private:
+        void* _storage;
+        ptrdiff_t _size;
+
+        friend struct ring_buffer;
+
+        transaction(void* storage, ptrdiff_t size) :
+            _storage(storage),
+            _size(size) {}
+
+        transaction(const transaction&) = delete;
+        transaction& operator=(const transaction&) = delete;
+
+    };
+
+    // start produce transaction
+    transaction produce_start(ptrdiff_t length) noexcept;
+
+    // abort produce transaction
+    bool produce_abort(transaction tx) noexcept;
+
+    // commit produce transaction
+    bool produce_commit(transaction tx) noexcept;
+
+    // start consume transaction
+    transaction consume_start() noexcept;
+
+    // abort consume transaction
+    bool consume_abort(transaction tx) noexcept;
+
+    // commit consume transaction
+    bool consume_commit(transaction tx) noexcept;
+
+    ptrdiff_t size() const noexcept;
+
+private:
+    std::atomic<size_t> _reserve_pos = 0;
+    char _padding0[align - sizeof(std::atomic<size_t>)];
+
+    std::atomic<size_t> _produce_pos = 0;
+    char _padding1[align - sizeof(std::atomic<size_t>)];
+
+    std::atomic<size_t> _lock_pos = 0;
+    char _padding2[align - sizeof(std::atomic<size_t>)];
+
+    std::atomic<size_t> _consume_pos = 0;
+    char _padding3[align - sizeof(std::atomic<size_t>)];
+
+    char _buffer[buffer_size];
+};
+
+
+template<size_t size_log2>
+typename ring_buffer<size_log2>::transaction ring_buffer<size_log2>::produce_start(ptrdiff_t length) noexcept {
+    if (length == 0)
+        return transaction{ nullptr, 0 };
+
+    // see size() for the reason behind the memory order here
+    size_t consume_pos = _consume_pos.load(std::memory_order_acquire);
+    size_t reserve_pos = _reserve_pos.load(std::memory_order_acquire);
+
+    // Always grab a contiguous block of memory. If we're at the end of the
+    // ring buffer, pad the allocation until wrap-around and allocate whats
+    // needed at the start.
+    ptrdiff_t wrap_distance = buffer_size - (reserve_pos & index_mask);
+    if (wrap_distance < ptrdiff_t(length + sizeof(ptrdiff_t))) {
+        new (_buffer + (reserve_pos & index_mask)) ptrdiff_t(-wrap_distance);
+        reserve_pos += wrap_distance;
+    }
+
+    if ((reserve_pos - consume_pos) > (buffer_size - (length + sizeof(ptrdiff_t))))
+        return transaction{ nullptr, 0 };
+
+    new (_buffer + (reserve_pos & index_mask)) ptrdiff_t(length);
+
+    // memory_order_release is used so that if someone sees the new value of _reserve_pos
+    // then all of the data up until that position is valid;
+    _reserve_pos.store(reserve_pos + (length + sizeof(ptrdiff_t)), std::memory_order_release);
+
+    return transaction{ _buffer + (reserve_pos & index_mask) + sizeof(ptrdiff_t), length };
+}
+
+template<size_t size_log2>
+bool ring_buffer<size_log2>::produce_abort(transaction tx) noexcept {
+    if (tx._size == 0)
+        return false;
+
+    // see size() for the reason behind the memory order here
+    size_t produce_pos = _produce_pos.load(std::memory_order_acquire);
+    size_t reserve_pos = _reserve_pos.load(std::memory_order_acquire);
+
+    size_t wrap_distance = buffer_size - (produce_pos & index_mask);
+    if (wrap_distance < (tx._size + sizeof(ptrdiff_t)))
+        reserve_pos -= wrap_distance;
+
+    if ((reserve_pos - produce_pos) < (tx._size + sizeof(ptrdiff_t)))
+        return false;
+
+    _reserve_pos.store(reserve_pos - (tx._size + sizeof(ptrdiff_t)), std::memory_order_release);
+
+    return true;
+}
+
+template<size_t size_log2>
+bool ring_buffer<size_log2>::produce_commit(transaction tx) noexcept {
+    if (tx._size == 0)
+        return false;
+
+    // see size() for the reason behind the memory order here
+    size_t produce_pos = _produce_pos.load(std::memory_order_acquire);
+    size_t reserve_pos = _reserve_pos.load(std::memory_order_acquire);
+
+    ptrdiff_t wrap_distance = buffer_size - (produce_pos & index_mask);
+    if (wrap_distance < tx._size)
+        produce_pos += wrap_distance;
+
+    if (ptrdiff_t(reserve_pos - produce_pos) < tx._size)
+        return false;
+
+    _produce_pos.store(produce_pos + tx._size, std::memory_order_release);
+
+    return true;
+}
+
+template<size_t size_log2>
+typename ring_buffer<size_log2>::transaction ring_buffer<size_log2>::consume_start() noexcept {
+    // see size() for the reason behind the memory order here
+    size_t lock_pos = _lock_pos.load(std::memory_order_acquire);
+    size_t produce_pos = _produce_pos.load(std::memory_order_acquire);
+
+    if ((produce_pos - lock_pos) < sizeof(ptrdiff_t))
+        return transaction{ nullptr, 0 };
+
+    ptrdiff_t length;
+    memcpy(&length, _buffer + (lock_pos & index_mask), sizeof(length));
+    
+    if (length < 0) {
+        lock_pos -= length;
+        memcpy(&length, _buffer + (lock_pos & index_mask), sizeof(length));
+    }
+
+    _lock_pos.store(lock_pos + length + sizeof(ptrdiff_t), std::memory_order_release);
+
+    return transaction{ _buffer + (lock_pos & index_mask) + sizeof(ptrdiff_t), length };
+}
+
+template<size_t size_log2>
+bool ring_buffer<size_log2>::consume_abort(transaction tx) noexcept {
+    if (tx._size == 0)
+        return false;
+
+    // see size() for the reason behind the memory order here
+    size_t consume_pos = _consume_pos.load(std::memory_order_acquire);
+    size_t lock_pos = _lock_pos.load(std::memory_order_acquire);
+
+    ptrdiff_t wrap_distance = buffer_size - (consume_pos & index_mask);
+    if (wrap_distance < (tx._size + sizeof(ptrdiff_t)))
+        lock_pos -= wrap_distance;
+
+    if ((lock_pos - consume_pos) < (tx._size + sizeof(ptrdiff_t)))
+        return false;
+
+    _consume_pos.store(lock_pos - (tx._size + sizeof(ptrdiff_t)), std::memory_order_release);
+
+    return true;
+}
+
+template<size_t size_log2>
+bool ring_buffer<size_log2>::consume_commit(transaction tx) noexcept {
+    if (tx._size == 0)
+        return false;
+
+    // see size() for the reason behind the memory order here
+    size_t consume_pos = _consume_pos.load(std::memory_order_acquire);
+    size_t lock_pos = _lock_pos.load(std::memory_order_acquire);
+
+    ptrdiff_t wrap_distance = buffer_size - (consume_pos & index_mask);
+    if (wrap_distance < ptrdiff_t(tx._size + sizeof(ptrdiff_t)))
+        consume_pos += wrap_distance;
+
+    if ((lock_pos - consume_pos) < (tx._size + sizeof(ptrdiff_t)))
+        return false;
+
+    _consume_pos.store(consume_pos + (tx._size + sizeof(ptrdiff_t)), std::memory_order_release);
+
+    return true;
+}
+
+template<size_t size_log2>
+i64 ring_buffer<size_log2>::size() const noexcept {
+    // the value of _consume_pos MUST be loaded before the value of _reserve_pos
+    // in order to ensure size() <= buffer_size is always true
+
+    size_t consume_pos = _consume_pos.load(std::memory_order_acquire);
+    size_t reserve_pos = _reserve_pos.load(std::memory_order_acquire);
+
+    return ptrdiff_t(reserve_pos - consume_pos);
+}
