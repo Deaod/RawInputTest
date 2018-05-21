@@ -18,7 +18,7 @@ set(headers
     src/stack.hpp
     src/threads.hpp
     src/types.hpp
-    src/vulkan_tools.hpp
+    src/vulkan_utils.hpp
 )
 
 set(sources

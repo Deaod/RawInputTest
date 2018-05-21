@@ -2,7 +2,7 @@
 
 #include "vulkan/vulkan.h"
 
-namespace vk::tools {
+namespace vk::utils {
 
 #define VK_GET_INSTANCE_PROC_ADDR(instance, function) \
     reinterpret_cast<PFN_vk##function>(vkGetInstanceProcAddr(instance, "vk" #function));
@@ -10,7 +10,7 @@ namespace vk::tools {
 #define VK_GET_DEVICE_PROC_ADDR(device, function) \
     reinterpret_cast<PFN_vk##function>(vkGetDeviceProcAddr(device, "vk" #function));
 
-#define VK_ON_FAIL_RETURN(condition, retval) ON_FAIL_EVAL_TRACE_RETURN((condition), _result_ == VK_SUCCESS, (retval), #condition " returned ", vk::tools::errorString(_result_))
+#define VK_ON_FAIL_RETURN(condition, retval) ON_FAIL_EVAL_TRACE_RETURN((condition), _result_ == VK_SUCCESS, (retval), #condition " returned ", vk::utils::errorString(_result_))
 #define VK_ON_FAIL_RETURN_VOID(condition) VK_ON_FAIL_RETURN((condition), (void)0);
 #define VK_ON_FAIL_RELAY(condition) VK_ON_FAIL_RETURN((condition), _result_)
 
@@ -52,4 +52,4 @@ __declspec(noinline) const char* errorString(VkResult res) {
     return "UNKNOWN_ERROR";
 }
 
-} // namespace vk::tools
+} // namespace vk::utils
