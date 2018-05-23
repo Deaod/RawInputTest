@@ -32,86 +32,89 @@ void log_float_value(float_attributes attrs, type val) {
     std::cout << out.str();
 }
 
-void log_integer(const integer_data& msg) {
-    switch (msg.attributes.length_log2) {
+size_t log_integer(integer_data* msg) {
+    switch (msg->attributes.length_log2) {
 #if CHAR_MAX < SHRT_MAX
         case ctu::log2(sizeof(char)):
-            if (msg.attributes.is_unsigned) {
+            if (msg->attributes.is_unsigned) {
                 unsigned char val;
-                memcpy(&val, msg.msg, sizeof(val));
-                log_integral_value(msg.attributes, val);
+                memcpy(&val, msg->msg, sizeof(val));
+                log_integral_value(msg->attributes, val);
             } else {
                 signed char val;
-                memcpy(&val, msg.msg, sizeof(val));
-                log_integral_value(msg.attributes, val);
+                memcpy(&val, msg->msg, sizeof(val));
+                log_integral_value(msg->attributes, val);
             }
             break;
 #endif
 
 #if SHRT_MAX < INT_MAX
         case ctu::log2(sizeof(short)):
-            if (msg.attributes.is_unsigned) {
+            if (msg->attributes.is_unsigned) {
                 unsigned short val;
-                memcpy(&val, msg.msg, sizeof(val));
-                log_integral_value(msg.attributes, val);
+                memcpy(&val, msg->msg, sizeof(val));
+                log_integral_value(msg->attributes, val);
             } else {
                 signed short val;
-                memcpy(&val, msg.msg, sizeof(val));
-                log_integral_value(msg.attributes, val);
+                memcpy(&val, msg->msg, sizeof(val));
+                log_integral_value(msg->attributes, val);
             }
             break;
 #endif
 
 #if INT_MAX < LONG_MAX
         case ctu::log2(sizeof(int)):
-            if (msg.attributes.is_unsigned) {
+            if (msg->attributes.is_unsigned) {
                 unsigned int val;
-                memcpy(&val, msg.msg, sizeof(val));
-                log_integral_value(msg.attributes, val);
+                memcpy(&val, msg->msg, sizeof(val));
+                log_integral_value(msg->attributes, val);
             } else {
                 signed int val;
-                memcpy(&val, msg.msg, sizeof(val));
-                log_integral_value(msg.attributes, val);
+                memcpy(&val, msg->msg, sizeof(val));
+                log_integral_value(msg->attributes, val);
             }
             break;
 #endif
 
 #if LONG_MAX < LLONG_MAX
         case ctu::log2(sizeof(long)):
-            if (msg.attributes.is_unsigned) {
+            if (msg->attributes.is_unsigned) {
                 unsigned long val;
-                memcpy(&val, msg.msg, sizeof(val));
-                log_integral_value(msg.attributes, val);
+                memcpy(&val, msg->msg, sizeof(val));
+                log_integral_value(msg->attributes, val);
             } else {
                 signed long val;
-                memcpy(&val, msg.msg, sizeof(val));
-                log_integral_value(msg.attributes, val);
+                memcpy(&val, msg->msg, sizeof(val));
+                log_integral_value(msg->attributes, val);
             }
             break;
 #endif
 
         case ctu::log2(sizeof(long long)):
-            if (msg.attributes.is_unsigned) {
+            if (msg->attributes.is_unsigned) {
                 unsigned long long val;
-                memcpy(&val, msg.msg, sizeof(val));
-                log_integral_value(msg.attributes, val);
+                memcpy(&val, msg->msg, sizeof(val));
+                log_integral_value(msg->attributes, val);
             } else {
                 signed long long val;
-                memcpy(&val, msg.msg, sizeof(val));
-                log_integral_value(msg.attributes, val);
+                memcpy(&val, msg->msg, sizeof(val));
+                log_integral_value(msg->attributes, val);
             }
             break;
     }
+
+    msg->~integer_data();
+    return sizeof(integer_data);
 }
 
-void log_float(const float_data& msg) {
-    switch (msg.attributes.length_log2) {
+size_t log_float(float_data* msg) {
+    switch (msg->attributes.length_log2) {
 #if FLT_MANT_DIG < DBL_MANT_DIG
         case ctu::log2(sizeof(float)):
         {
             float val;
-            memcpy(&val, msg.msg, sizeof(val));
-            log_float_value(msg.attributes, val);
+            memcpy(&val, msg->msg, sizeof(val));
+            log_float_value(msg->attributes, val);
             break;
         }
 #endif
@@ -120,8 +123,8 @@ void log_float(const float_data& msg) {
         case ctu::log2(sizeof(double)):
         {
             double val;
-            memcpy(&val, msg.msg, sizeof(val));
-            log_float_value(msg.attributes, val);
+            memcpy(&val, msg->msg, sizeof(val));
+            log_float_value(msg->attributes, val);
             break;
         }
 #endif
@@ -129,56 +132,30 @@ void log_float(const float_data& msg) {
         case ctu::log2(sizeof(long double)):
         {
             long double val;
-            memcpy(&val, msg.msg, sizeof(val));
-            log_float_value(msg.attributes, val);
+            memcpy(&val, msg->msg, sizeof(val));
+            log_float_value(msg->attributes, val);
             break;
         }
     }
+
+    msg->~float_data();
+    return sizeof(float_data);
+}
+
+size_t log_std_string(std_string_data* msg) {
+    std::cout << msg->string;
+    msg->~std_string_data();
+    return sizeof(std_string_data);
+}
+
+size_t log_string_literal(string_literal_data* msg) {
+    std::cout.write(msg->address, msg->length - 1);
+    msg->~string_literal_data();
+    return sizeof(string_literal_data);
 }
 
 size_t log_segment(void* data) {
-    union log_data {
-        data_type type;
-        string_literal_data string_literal;
-        std_string_data std_string;
-        integer_data integer;
-        float_data float_;
-
-        // avoid warnings about implicitly deleted destructor by explicitly deleting it
-        ~log_data() = delete;
-    };
-
-    log_data* ld = reinterpret_cast<log_data*>(data);
-
-    switch (ld->type) {
-        case data_type::STRING_LITERAL: {
-            std::cout.write(ld->string_literal.address, ld->string_literal.length - 1);
-            ld->string_literal.~string_literal_data();
-            return sizeof(string_literal_data);
-        }
-
-        case data_type::STD_STRING: {
-            std::cout << ld->std_string.string;
-            ld->std_string.~std_string_data();
-            return sizeof(std_string_data);
-        }
-
-        case data_type::INTEGER: {
-            log_integer(ld->integer);
-            ld->integer.~integer_data();
-            return sizeof(integer_data);
-        }
-
-        case data_type::FLOAT: {
-            log_float(ld->float_);
-            ld->float_.~float_data();
-            return sizeof(float_data);
-        }
-
-        default:
-            break;
-    }
-    return 0;
+    return static_cast<segment_data*>(data)->log_func(data);
 }
 
 void do_logging() {

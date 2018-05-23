@@ -41,13 +41,6 @@ namespace belog {
 using thread_buffer_t = spsc_ring_buffer<BELOG_BUFFER_SIZE_LOG2>;
 extern std::array<std::atomic<thread_buffer_t*>, 256> thread_buffer;
 
-enum class data_type : char {
-    STRING_LITERAL,
-    STD_STRING,
-    INTEGER,
-    FLOAT
-};
-
 union integer_attributes {
     u32 all_bits;
     bitfield<u32, 0, 1> length_log2;
@@ -81,8 +74,19 @@ struct line_start_data {
     {}
 };
 
-struct string_literal_data {
-    data_type type;
+struct segment_data {
+    using log_func_signature = size_t(void*);
+    log_func_signature* log_func;
+
+    segment_data(log_func_signature* log_func) : log_func(log_func) {}
+
+    template<typename sig>
+    segment_data(sig* log_func, std::enable_if_t<std::is_function_v<sig> && (std::is_same_v<sig, log_func_signature> == false)>* = nullptr)
+        : segment_data((log_func_signature*) log_func) {}
+};
+
+size_t log_string_literal(struct string_literal_data*);
+struct string_literal_data : segment_data {
     const char* address;
     size_t length;
 
@@ -92,35 +96,35 @@ struct string_literal_data {
     {}
 
     explicit string_literal_data(const char* address, size_t length) :
-        type(data_type::STRING_LITERAL),
+        segment_data(log_string_literal),
         address(address),
         length(length)
     {}
 };
 
-struct std_string_data {
-    data_type type;
+size_t log_std_string(struct std_string_data*);
+struct std_string_data : segment_data {
     std::string string;
 
     explicit std_string_data(const std::string& string) :
-        type(data_type::STD_STRING),
+        segment_data(log_std_string),
         string(string)
     {}
 
     explicit std_string_data(std::string&& string) :
-        type(data_type::STD_STRING),
+        segment_data(log_std_string),
         string(std::move(string))
     {}
 };
 
-struct integer_data {
-    data_type type;
+size_t log_integer(struct integer_data*);
+struct integer_data : segment_data {
     integer_attributes attributes;
     char msg[sizeof(long long)];
 
     template<typename ty>
     explicit integer_data(ty msg) :
-        type(data_type::INTEGER),
+        segment_data(log_integer),
         attributes(0)
     {
         assign(msg);
@@ -141,14 +145,14 @@ struct integer_data {
     }
 };
 
-struct float_data {
-    data_type type;
+size_t log_float(struct float_data*);
+struct float_data : segment_data {
     float_attributes attributes;
     char msg[sizeof(long double)];
 
     template<typename ty>
     explicit float_data(ty msg) :
-        type(data_type::FLOAT),
+        segment_data(log_float),
         attributes(0)
     {
         attributes.length_log2 = static_cast<u32>(ctu::log2_v<size_t, sizeof(msg)>);
@@ -204,6 +208,11 @@ typename segment<msg_type&&>::container_type fmt(msg_type&& msg, fmt_types&&... 
 
 template<typename... types>
 bool log(types&&... msgs) {
+    static_assert(
+        (std::is_base_of_v<segment_data, typename segment<types&&>::container_type> && ...),
+        "container types must be derived from struct ::belog::segment_data"
+    );
+
     constexpr const auto length = line_size<types...>;
     auto tbuf = thread_buffer[threads::current::id()].load(std::memory_order_relaxed);
 
