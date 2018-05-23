@@ -14,7 +14,7 @@ public:
 
     // callback should place an instance of _element_type at the address that is passed to it.
     template<typename cbtype>
-    bool produce(cbtype&& callback) noexcept(noexcept(callback(static_cast<void*>(nullptr)))) {
+    bool produce(cbtype callback) noexcept(noexcept(callback(static_cast<void*>(nullptr)))) {
         auto consume_pos = _consume_pos.load(std::memory_order_acquire);
         auto produce_pos = _produce_pos.load(std::memory_order_acquire);
 
@@ -41,7 +41,7 @@ public:
     } 
 
     template<typename cbtype>
-    bool consume(cbtype&& callback) noexcept(noexcept(callback(static_cast<_element_type*>(nullptr)))) {
+    bool consume(cbtype callback) noexcept(noexcept(callback(static_cast<_element_type*>(nullptr)))) {
         auto consume_pos = _consume_pos.load(std::memory_order_acquire);
         auto produce_pos = _produce_pos.load(std::memory_order_acquire);
 
