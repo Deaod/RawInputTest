@@ -176,7 +176,7 @@ void do_logging() {
                 continue;
 
             auto consumed = tbuf->consume([&](void* storage, size_t length) {
-                line_start_data* line = reinterpret_cast<line_start_data*>(storage);
+                line_start_data* line = static_cast<line_start_data*>(storage);
 
                 if (line->timepoint == SHUTDOWN_SENTINEL_VALUE) {
                     shutdown_requested = true;
