@@ -57,4 +57,11 @@ constexpr real deg_to_rad(real angle) {
     return angle * (pi / real(180.0));
 }
 
+template<typename type>
+constexpr type clamp(type val, type from, type to) {
+    if (val < from) return from;
+    if (val > to) return to;
+    return val;
+}
+
 } // namespace ctu
