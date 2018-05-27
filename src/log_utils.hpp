@@ -9,18 +9,18 @@
 #define LOG_INFO(...) ::belog::log("[I] (" __FILE__ ":" STRINGIFY(__LINE__) ") ", __VA_ARGS__)
 #if defined(_DEBUG)
 #define LOG_DEBUG(...) ::belog::log("[D] (" __FILE__ ":" STRINGIFY(__LINE__) ") ", __VA_ARGS__)
-#define DEBUG_BREAK DebugBreak()
 #else
 #define LOG_DEBUG(...)
-#define DEBUG_BREAK 
 #endif
+
+#define DEBUG_BREAK DebugBreak()
 
 #define ON_FAIL_EVAL_TRACE(condition, eval, ...) \
 do {                                             \
     const auto& _result = (condition);           \
     if (!(eval)) {                               \
-        LOG_ERR(__VA_ARGS__);                    \
-        DEBUG_BREAK;                             \
+        if (!LOG_ERR(__VA_ARGS__))               \
+            DEBUG_BREAK;                         \
     }                                            \
 } while(0)
 
@@ -30,8 +30,8 @@ do {                                             \
 do {                                                            \
     const auto& _result_ = (condition);                         \
     if (!(eval)) {                                              \
-        LOG_ERR(__VA_ARGS__);                                   \
-        DEBUG_BREAK;                                            \
+        if (!LOG_ERR(__VA_ARGS__))                              \
+            DEBUG_BREAK;                                        \
         return (retval);                                        \
     }                                                           \
 } while(0)
@@ -48,8 +48,8 @@ do {                                                            \
 do {                                                              \
     const auto& _result_ = (condition);                           \
     if (!(eval)) {                                                \
-        LOG_ERR(__VA_ARGS__);                                     \
-        DEBUG_BREAK;                                              \
+        if (!LOG_ERR(__VA_ARGS__))                                \
+            DEBUG_BREAK;                                          \
         throw (exception);                                        \
     }                                                             \
 } while(0)
