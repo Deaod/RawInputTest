@@ -155,7 +155,8 @@ size_t log_string_literal(string_literal_data* msg) {
 }
 
 size_t log_segment(void* data) {
-    return static_cast<segment_data*>(data)->log_func(data);
+    segment_data* s = static_cast<segment_data*>(data);
+    return s->log_func(s);
 }
 
 void do_logging() {
