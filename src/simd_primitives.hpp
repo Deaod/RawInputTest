@@ -172,6 +172,8 @@ struct __declspec(align(4 * sizeof(f32))) quaternion {
 
     explicit quaternion(__m128 reg) : reg(reg) {}
 
+    explicit quaternion(const vector3& v) : reg{ 0.0f, v.x(), v.y(), v.z() } {}
+
     quaternion(f32 w, f32 x, f32 y, f32 z) : reg{ w, x, y, z } {}
 
     f32 w() const {
@@ -227,7 +229,7 @@ struct __declspec(align(4 * sizeof(f32))) quaternion {
     }
 
     vector3 rotate(const vector3& p) const {
-        auto pstar = *this * quaternion{ p.reg } *reciprocal();
+        auto pstar = *this * quaternion{ p } * reciprocal();
         return vector3{ pstar.x(), pstar.y(), pstar.z() };
     }
 
