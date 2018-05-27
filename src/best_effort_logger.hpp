@@ -19,6 +19,7 @@ fmt(msg_type&& msg, fmt_types&&... fmt_attrs);
 
 void do_logging();
 bool shutdown();
+void emergency_shutdown();
 
 } // namespace belog
 

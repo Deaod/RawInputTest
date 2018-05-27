@@ -11,6 +11,7 @@ namespace belog {
 
 std::array<std::atomic<thread_buffer_t*>, 256> thread_buffer;
 static constexpr u64 SHUTDOWN_SENTINEL_VALUE = ~u64(0);
+static std::atomic_bool emergency_shutdown_requested = false;
 
 template<typename type>
 void log_integral_value(integer_attributes attrs, type val) {
@@ -172,6 +173,9 @@ void do_logging() {
 
         u32 max_id = threads::max_assigned_id();
         for (u32 id = 0; id < max_id; id += 1) {
+            if (emergency_shutdown_requested.load(std::memory_order_relaxed))
+                return;
+            
             auto tbuf = thread_buffer[id].load(std::memory_order_relaxed);
             if (tbuf == nullptr)
                 continue;
@@ -244,6 +248,10 @@ bool shutdown() {
         new(storage) line_start_data(SHUTDOWN_SENTINEL_VALUE);
         return true;
     });
+}
+
+void emergency_shutdown() {
+    emergency_shutdown_requested = true;
 }
 
 bool enable_logging() {
