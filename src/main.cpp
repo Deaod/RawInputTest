@@ -1023,7 +1023,7 @@ LRESULT CALLBACK input_wndproc(HWND window, UINT message, WPARAM wparam, LPARAM 
             switch (raw.header.dwType) {
                 case RIM_TYPEKEYBOARD: {
                     auto& kb = raw.data.keyboard;
-                    LOG_DEBUG(
+                    LOG_INFO(
                         "  Kbd: make=", belog::fmt(kb.MakeCode, belog::hex{}, belog::padding{ 4, '0' }),
                         " Flags=", belog::fmt(kb.Flags, belog::hex{}, belog::padding{ 4, '0' }),
                         " msg=", kb.Message
@@ -1035,23 +1035,28 @@ LRESULT CALLBACK input_wndproc(HWND window, UINT message, WPARAM wparam, LPARAM 
                 }
 
                 case RIM_TYPEMOUSE: {
-                    static vector3 view_direction{ 1.0f, 0.0f, 0.0f };
+                    static f32 yaw = 0.0f;
+                    static f32 pitch = 0.0f;
                     auto& m = raw.data.mouse;
 
                     constexpr f32 sensitivityX = 0.005f;
                     constexpr f32 sensitivityY = 0.005f;
 
-                    auto yaw = ctu::deg_to_rad(float(m.lLastX)) * sensitivityX;
-                    auto pitch = ctu::deg_to_rad(float(m.lLastY)) * sensitivityY;
-                    quaternion yaw_quat{ cos(yaw), 0.0f, 0.0f, sin(yaw) };
-                    quaternion pitch_quat{ cos(pitch), 0.0f, sin(pitch), 0.0f };
+                    yaw += float(m.lLastX) * sensitivityX;
+                    pitch = ctu::clamp(pitch + float(m.lLastY) * sensitivityY, -90.0f, 90.0f);
 
-                    auto rot_quat = yaw_quat * pitch_quat;
+                    if (yaw > 360.0f) yaw -= 360.0f;
+                    if (yaw < -360.0f) yaw += 360.0f;
 
-                    [[maybe_unused]]
-                    auto view = new(&view_direction) vector3{ view_direction.rotate(rot_quat).unit() };
+                    f32 yaw_rad = ctu::deg_to_rad(yaw);
+                    f32 pitch_rad = ctu::deg_to_rad(pitch);
+                    
+                    auto view = vector3{ 1.0f, 0.0f, 0.0f }.rotate(
+                        quaternion{ cos(yaw_rad / 2.0f), 0.0f, 0.0f, sin(yaw_rad / 2.0f) } *
+                        quaternion{ cos(pitch_rad / 2.0f), 0.0f, sin(pitch_rad / 2.0f), 0.0f }
+                    ).unit();
 
-                    LOG_DEBUG(" View: (", view->x(), ", ", view->y(), ", ", view->z(), ")");
+                    LOG_INFO(" View: (", view.x(), ", ", view.y(), ", ", view.z(), ")");
                     break;
                 }
             }
