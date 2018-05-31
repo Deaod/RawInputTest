@@ -5,10 +5,10 @@
 namespace vk::utils {
 
 #define VK_GET_INSTANCE_PROC_ADDR(instance, function) \
-    reinterpret_cast<PFN_vk##function>(vkGetInstanceProcAddr(instance, "vk" #function));
+    auto function = reinterpret_cast<PFN_##function>(vkGetInstanceProcAddr(instance, #function));
 
 #define VK_GET_DEVICE_PROC_ADDR(device, function) \
-    reinterpret_cast<PFN_vk##function>(vkGetDeviceProcAddr(device, "vk" #function));
+    auto function = reinterpret_cast<PFN_##function>(vkGetDeviceProcAddr(device, #function));
 
 #define VK_ON_FAIL_RETURN(condition, retval) ON_FAIL_EVAL_TRACE_RETURN((condition), _result_ == VK_SUCCESS, (retval), #condition " returned ", vk::utils::errorString(_result_))
 #define VK_ON_FAIL_RETURN_VOID(condition) VK_ON_FAIL_RETURN((condition), (void)0);

@@ -204,16 +204,16 @@ void input_thread_fn() {
         );
     }
 
-    [[maybe_unused]] auto vkGetPhysicalDeviceSurfaceSupportKHR = VK_GET_INSTANCE_PROC_ADDR(instance, GetPhysicalDeviceSurfaceSupportKHR);
-    [[maybe_unused]] auto vkGetPhysicalDeviceSurfaceCapabilitiesKHR = VK_GET_INSTANCE_PROC_ADDR(instance, GetPhysicalDeviceSurfaceCapabilitiesKHR);
-    [[maybe_unused]] auto vkGetPhysicalDeviceSurfaceFormatsKHR = VK_GET_INSTANCE_PROC_ADDR(instance, GetPhysicalDeviceSurfaceFormatsKHR);
-    [[maybe_unused]] auto vkGetPhysicalDeviceSurfacePresentModesKHR = VK_GET_INSTANCE_PROC_ADDR(instance, GetPhysicalDeviceSurfacePresentModesKHR);
+    [[maybe_unused]] VK_GET_INSTANCE_PROC_ADDR(instance, vkGetPhysicalDeviceSurfaceSupportKHR);
+    [[maybe_unused]] VK_GET_INSTANCE_PROC_ADDR(instance, vkGetPhysicalDeviceSurfaceCapabilitiesKHR);
+    [[maybe_unused]] VK_GET_INSTANCE_PROC_ADDR(instance, vkGetPhysicalDeviceSurfaceFormatsKHR);
+    [[maybe_unused]] VK_GET_INSTANCE_PROC_ADDR(instance, vkGetPhysicalDeviceSurfacePresentModesKHR);
 
-    [[maybe_unused]] auto vkCreateSwapchainKHR = VK_GET_DEVICE_PROC_ADDR(device, CreateSwapchainKHR);
-    [[maybe_unused]] auto vkDestroySwapchainKHR = VK_GET_DEVICE_PROC_ADDR(device, DestroySwapchainKHR);
-    [[maybe_unused]] auto vkGetSwapchainImagesKHR = VK_GET_DEVICE_PROC_ADDR(device, GetSwapchainImagesKHR);
-    [[maybe_unused]] auto vkAcquireNextImageKHR = VK_GET_DEVICE_PROC_ADDR(device, AcquireNextImageKHR);
-    [[maybe_unused]] auto vkQueuePresentKHR = VK_GET_DEVICE_PROC_ADDR(device, QueuePresentKHR);
+    [[maybe_unused]] VK_GET_DEVICE_PROC_ADDR(device, vkCreateSwapchainKHR);
+    [[maybe_unused]] VK_GET_DEVICE_PROC_ADDR(device, vkDestroySwapchainKHR);
+    [[maybe_unused]] VK_GET_DEVICE_PROC_ADDR(device, vkGetSwapchainImagesKHR);
+    [[maybe_unused]] VK_GET_DEVICE_PROC_ADDR(device, vkAcquireNextImageKHR);
+    [[maybe_unused]] VK_GET_DEVICE_PROC_ADDR(device, vkQueuePresentKHR);
 
     struct {
         // Swap chain image presentation
@@ -1045,16 +1045,13 @@ LRESULT CALLBACK input_wndproc(HWND window, UINT message, WPARAM wparam, LPARAM 
                     yaw += float(m.lLastX) * sensitivityX;
                     pitch = ctu::clamp(pitch + float(m.lLastY) * sensitivityY, -90.0f, 90.0f);
 
-                    if (yaw > 360.0f) yaw -= 360.0f;
+                    if (yaw > 360.0f) yaw += -360.0f;
                     if (yaw < -360.0f) yaw += 360.0f;
 
                     f32 yaw_rad = ctu::deg_to_rad(yaw);
                     f32 pitch_rad = ctu::deg_to_rad(pitch);
                     
-                    auto view = vector3{ 1.0f, 0.0f, 0.0f }.rotate(
-                        quaternion{ cos(yaw_rad / 2.0f), 0.0f, 0.0f, sin(yaw_rad / 2.0f) } *
-                        quaternion{ cos(pitch_rad / 2.0f), 0.0f, sin(pitch_rad / 2.0f), 0.0f }
-                    ).unit();
+                    auto view = vector3{ cos(yaw_rad) * cos(pitch_rad), sin(yaw_rad) * cos(pitch_rad), sin(pitch_rad) };
 
                     LOG_INFO(" View: (", view.x(), ", ", view.y(), ", ", view.z(), ")");
                     break;
