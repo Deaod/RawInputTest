@@ -65,7 +65,7 @@ void log_integral_value(stream& out, integer_attributes attrs, type val) {
 
         auto ptr = buffer + 32;
 
-        while (abs_val > 100) {
+        while (abs_val >= 100) {
             size_t idx = (abs_val % 100) * 2;
             *(ptr--) = DIGITS[idx + 1];
             *(ptr--) = DIGITS[idx];
