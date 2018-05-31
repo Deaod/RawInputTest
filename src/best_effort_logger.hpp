@@ -259,7 +259,7 @@ struct integer_data : segment_data {
     template<typename ty>
     void assign(ty msg) {
         attributes.is_unsigned = std::is_unsigned_v<ty> ? 1u : 0u;
-        attributes.length_log2 = static_cast<u32>(ctu::log2_v<size_t, sizeof(msg)>);
+        attributes.length_log2 = static_cast<u32>(ctu::log2_v<sizeof(msg)>);
         memcpy(this->msg, &msg, sizeof(msg));
     }
 };
@@ -353,7 +353,7 @@ struct float_data : segment_data {
     explicit float_data(ty msg) :
         segment_data(log_float),
         attributes(0) {
-        attributes.length_log2 = static_cast<u32>(ctu::log2_v<size_t, sizeof(msg)>);
+        attributes.length_log2 = static_cast<u32>(ctu::log2_v<sizeof(msg)>);
         memcpy(this->msg, &msg, sizeof(msg));
     }
 };

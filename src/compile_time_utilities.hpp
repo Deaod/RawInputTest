@@ -42,7 +42,7 @@ constexpr int log2(type val) {
     }
 }
 
-template<typename T, T val>
+template<auto val>
 constexpr int log2_v = log2(val);
 
 template<typename type>

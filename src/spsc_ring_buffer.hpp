@@ -18,7 +18,7 @@ struct spsc_ring_buffer {
         auto consume_pos = _consume_pos.load(std::memory_order_acquire);
         auto produce_pos = _produce_pos.load(std::memory_order_acquire);
 
-        auto rounded_length = ctu::round_up_bits(length, ctu::log2_v<size_t, sizeof(ptrdiff_t)>);
+        auto rounded_length = ctu::round_up_bits(length, ctu::log2_v<sizeof(ptrdiff_t)>);
 
         if ((produce_pos - consume_pos) > (size - (rounded_length + sizeof(ptrdiff_t))))
             return false;
@@ -58,7 +58,7 @@ struct spsc_ring_buffer {
         }
 
         if (callback(static_cast<void*>(_buffer + (consume_pos & mask) + sizeof(ptrdiff_t)), length)) {
-            auto rounded_length = ctu::round_up_bits(length, ctu::log2_v<size_t, sizeof(ptrdiff_t)>);
+            auto rounded_length = ctu::round_up_bits(length, ctu::log2_v<sizeof(ptrdiff_t)>);
             _consume_pos.store(consume_pos + (rounded_length + sizeof(ptrdiff_t)), std::memory_order_release);
             return true;
         }
@@ -90,7 +90,7 @@ struct spsc_ring_buffer {
                     return false;
                 }
 
-                auto rounded_length = ctu::round_up_bits(length, ctu::log2_v<size_t, sizeof(ptrdiff_t)>);
+                auto rounded_length = ctu::round_up_bits(length, ctu::log2_v<sizeof(ptrdiff_t)>);
                 consume_pos += (rounded_length + sizeof(ptrdiff_t));
             }
 
