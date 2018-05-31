@@ -19,6 +19,7 @@ set(headers
     src/threads.hpp
     src/types.hpp
     src/vulkan_utils.hpp
+    src/bitmanip.hpp
 )
 
 set(sources
@@ -28,6 +29,12 @@ set(sources
     src/compile_time_utilities.cpp
     src/cpuid.cpp
 )
+
+if (MSVC)
+    list(APPEND sources 
+        src/msvc/bitmanip.cpp
+    )
+endif()
 
 source_group("Header Files" FILES ${headers})
 source_group("Source Files" FILES ${sources})
