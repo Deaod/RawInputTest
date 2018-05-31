@@ -6,6 +6,7 @@
 #include <sstream>
 #include <thread>
 #include "aligned_alloc.hpp"
+#include "bitmanip.hpp"
 
 namespace belog {
 
@@ -13,24 +14,89 @@ std::array<std::atomic<thread_buffer_t*>, 256> thread_buffer;
 static constexpr u64 SHUTDOWN_SENTINEL_VALUE = ~u64(0);
 static std::atomic_bool emergency_shutdown_requested = false;
 
-template<typename type>
-void log_integral_value(integer_attributes attrs, type val) {
-    std::stringstream out;
-    out << (attrs.is_hex ? std::hex : std::dec)
-        << (attrs.is_uppercase ? std::uppercase : std::nouppercase)
-        << (attrs.is_left_aligned ? std::left : std::right)
-        << std::setw(attrs.padded_length)
-        << std::setfill(static_cast<char>(attrs.padding_codepoint))
-        << val;
-    std::cout << out.str();
+template<typename stream, typename type>
+void log_integral_value(stream& out, integer_attributes attrs, type val) {
+    if (attrs.is_hex) {
+        const char* base = attrs.is_uppercase ? "0123456789ABCDEF" : "0123456789abcdef";
+        char buffer[32];
+        int digits = (bitmanip::find_last_set(val) / 4) + 1;
+
+        size_t idx = 0;
+        if (attrs.is_left_aligned == false && attrs.padded_length > digits) {
+            while (idx < attrs.padded_length - digits) {
+                buffer[idx] = char(attrs.padding_codepoint);
+                idx += 1;
+            }
+        }
+
+        do {
+            digits -= 1;
+            buffer[idx] = base[(val >> (digits * 4)) & 0xF];
+            idx += 1;
+        } while (digits > 0);
+
+        if (attrs.is_left_aligned) {
+            while (idx < attrs.padded_length) {
+                buffer[idx] = char(attrs.padding_codepoint);
+                idx += 1;
+            }
+        }
+
+        out.write(buffer, idx);
+    } else {
+        static auto& DIGITS =
+            "0001020304050607080910111213141516171819"
+            "2021222324252627282930313233343536373839"
+            "4041424344454647484950515253545556575859"
+            "6061626364656667686970717273747576777879"
+            "8081828384858687888990919293949596979899";
+
+        char buffer[64];
+        memset(buffer, int(attrs.padding_codepoint), sizeof(buffer));
+
+        std::make_unsigned_t<type> abs_val;
+        if constexpr (std::is_unsigned_v<type>) {
+            abs_val = val;
+        } else if (val < 0) {
+            abs_val = std::make_unsigned_t<type>(~val + 1);
+        } else {
+            abs_val = val;
+        }
+
+        auto ptr = buffer + 32;
+
+        while (abs_val > 100) {
+            size_t idx = (abs_val % 100) * 2;
+            *(ptr--) = DIGITS[idx + 1];
+            *(ptr--) = DIGITS[idx];
+            abs_val /= 100;
+        }
+        if (abs_val < 10) {
+            *(ptr--) = char('0' + abs_val);
+        } else {
+            *(ptr--) = DIGITS[abs_val * 2 + 1];
+            *(ptr--) = DIGITS[abs_val * 2];
+        }
+        if (val < 0) {
+            *(ptr--) = '-';
+        }
+
+        size_t write_len = std::max(size_t(attrs.padded_length), size_t((buffer + 32) - ptr - 1));
+        
+        if (attrs.is_left_aligned) {
+            out.write(ptr + 1, write_len);
+        } else {
+            out.write(buffer + 32 - write_len, write_len);
+        }
+    }
 }
 
-template<typename type>
-void log_float_value(float_attributes attrs, type val) {
+template<typename stream, typename type>
+void log_float_value(stream& out, float_attributes attrs, type val) {
     attrs;
-    std::stringstream out;
-    out << val;
-    std::cout << out.str();
+    std::stringstream s;
+    s << val;
+    out << s.str();
 }
 
 size_t log_integer(integer_data* msg) {
@@ -40,11 +106,11 @@ size_t log_integer(integer_data* msg) {
             if (msg->attributes.is_unsigned) {
                 unsigned char val;
                 memcpy(&val, msg->msg, sizeof(val));
-                log_integral_value(msg->attributes, val);
+                log_integral_value(std::cout, msg->attributes, val);
             } else {
                 signed char val;
                 memcpy(&val, msg->msg, sizeof(val));
-                log_integral_value(msg->attributes, val);
+                log_integral_value(std::cout, msg->attributes, val);
             }
             break;
 #endif
@@ -54,11 +120,11 @@ size_t log_integer(integer_data* msg) {
             if (msg->attributes.is_unsigned) {
                 unsigned short val;
                 memcpy(&val, msg->msg, sizeof(val));
-                log_integral_value(msg->attributes, val);
+                log_integral_value(std::cout, msg->attributes, val);
             } else {
                 signed short val;
                 memcpy(&val, msg->msg, sizeof(val));
-                log_integral_value(msg->attributes, val);
+                log_integral_value(std::cout, msg->attributes, val);
             }
             break;
 #endif
@@ -68,11 +134,11 @@ size_t log_integer(integer_data* msg) {
             if (msg->attributes.is_unsigned) {
                 unsigned int val;
                 memcpy(&val, msg->msg, sizeof(val));
-                log_integral_value(msg->attributes, val);
+                log_integral_value(std::cout, msg->attributes, val);
             } else {
                 signed int val;
                 memcpy(&val, msg->msg, sizeof(val));
-                log_integral_value(msg->attributes, val);
+                log_integral_value(std::cout, msg->attributes, val);
             }
             break;
 #endif
@@ -82,11 +148,11 @@ size_t log_integer(integer_data* msg) {
             if (msg->attributes.is_unsigned) {
                 unsigned long val;
                 memcpy(&val, msg->msg, sizeof(val));
-                log_integral_value(msg->attributes, val);
+                log_integral_value(std::cout, msg->attributes, val);
             } else {
                 signed long val;
                 memcpy(&val, msg->msg, sizeof(val));
-                log_integral_value(msg->attributes, val);
+                log_integral_value(std::cout, msg->attributes, val);
             }
             break;
 #endif
@@ -95,11 +161,11 @@ size_t log_integer(integer_data* msg) {
             if (msg->attributes.is_unsigned) {
                 unsigned long long val;
                 memcpy(&val, msg->msg, sizeof(val));
-                log_integral_value(msg->attributes, val);
+                log_integral_value(std::cout, msg->attributes, val);
             } else {
                 signed long long val;
                 memcpy(&val, msg->msg, sizeof(val));
-                log_integral_value(msg->attributes, val);
+                log_integral_value(std::cout, msg->attributes, val);
             }
             break;
     }
@@ -115,7 +181,7 @@ size_t log_float(float_data* msg) {
         {
             float val;
             memcpy(&val, msg->msg, sizeof(val));
-            log_float_value(msg->attributes, val);
+            log_float_value(std::cout, msg->attributes, val);
             break;
         }
 #endif
@@ -125,7 +191,7 @@ size_t log_float(float_data* msg) {
         {
             double val;
             memcpy(&val, msg->msg, sizeof(val));
-            log_float_value(msg->attributes, val);
+            log_float_value(std::cout, msg->attributes, val);
             break;
         }
 #endif
@@ -134,7 +200,7 @@ size_t log_float(float_data* msg) {
         {
             long double val;
             memcpy(&val, msg->msg, sizeof(val));
-            log_float_value(msg->attributes, val);
+            log_float_value(std::cout, msg->attributes, val);
             break;
         }
     }
