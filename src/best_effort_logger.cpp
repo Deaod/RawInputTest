@@ -79,6 +79,8 @@ void log_integral_value(stream& out, integer_attributes attrs, type val) {
         }
         if (val < 0) {
             *(ptr--) = '-';
+        } else if (attrs.show_sign) {
+            *(ptr--) = '+';
         }
 
         size_t write_len = std::max(size_t(attrs.padded_length), size_t((buffer + 32) - ptr - 1));

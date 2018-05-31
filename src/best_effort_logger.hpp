@@ -229,9 +229,10 @@ union integer_attributes {
     bitfield<u64, 2> is_unsigned;
     bitfield<u64, 3> is_hex;
     bitfield<u64, 4> is_uppercase;
-    bitfield<u64, 5> is_left_aligned;
-    bitfield<u64, 6, 10> padded_length;
-    bitfield<u64, 11, 31> padding_codepoint;
+    bitfield<u64, 5> show_sign;
+    bitfield<u64, 37> is_left_aligned;
+    bitfield<u64, 38, 42> padded_length;
+    bitfield<u64, 43, 63> padding_codepoint;
 
     explicit integer_attributes(u64 initval) :
         all_bits(initval) {}
@@ -401,6 +402,12 @@ BELOG_SEGMENT_FORWARD(long double&&, long double);
 struct hex {
     void operator()(integer_attributes& attrs) {
         attrs.is_hex = true;
+    }
+};
+
+struct show_sign {
+    void operator()(integer_attributes& attrs) {
+        attrs.show_sign = true;
     }
 };
 
