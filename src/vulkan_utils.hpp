@@ -11,8 +11,12 @@ namespace vk::utils {
     auto function = reinterpret_cast<PFN_##function>(vkGetDeviceProcAddr(device, #function));
 
 #define VK_ON_FAIL_RETURN(condition, retval) ON_FAIL_EVAL_TRACE_RETURN((condition), _result_ == VK_SUCCESS, (retval), #condition " returned ", vk::utils::errorString(_result_))
-#define VK_ON_FAIL_RETURN_VOID(condition) VK_ON_FAIL_RETURN((condition), (void)0);
+#define VK_ON_FAIL_RETURN_VOID(condition) VK_ON_FAIL_RETURN((condition), (void)0)
 #define VK_ON_FAIL_RELAY(condition) VK_ON_FAIL_RETURN((condition), _result_)
+
+#define VK_ON_ERROR_RETURN(condition, retval) ON_FAIL_EVAL_TRACE_RETURN((condition), _result_ >= VK_SUCCESS, (retval), #condition " returned ", vk::utils::errorString(_result_))
+#define VK_ON_ERROR_RETURN_VOID(condition) VK_ON_ERROR_RETURN((condition), (void)0)
+#define VK_ON_ERROR_RELAY(condition) VK_ON_ERROR_RETURN((condition), _result_)
 
 __declspec(noinline) const char* errorString(VkResult res) {
     switch (res) {
