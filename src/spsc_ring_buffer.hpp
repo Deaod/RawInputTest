@@ -4,11 +4,11 @@
 #include <cstddef>
 #include "compile_time_utilities.hpp"
 
-template<int buffer_size_log2, int align_log2 = 6>
+template<int _buffer_size_log2, int _align_log2 = 6>
 struct spsc_ring_buffer {
-    static const auto size = size_t(1) << buffer_size_log2;
+    static const auto size = size_t(1) << _buffer_size_log2;
     static const auto mask = size - 1;
-    static const auto align = size_t(1) << align_log2;
+    static const auto align = size_t(1) << _align_log2;
 
     template<typename cbtype>
     bool produce(size_t length, cbtype callback) noexcept(noexcept(callback(static_cast<void*>(nullptr)))) {
@@ -25,11 +25,11 @@ struct spsc_ring_buffer {
 
         auto wrap_distance = size - (produce_pos & mask);
         if (wrap_distance < (rounded_length + sizeof(ptrdiff_t))) {
-            new (_buffer + (produce_pos & mask)) ptrdiff_t(-ptrdiff_t(wrap_distance));
             produce_pos += wrap_distance;
-
             if ((produce_pos - consume_pos) > (size - (rounded_length + sizeof(ptrdiff_t))))
                 return false;
+
+            new (_buffer + (produce_pos & mask)) ptrdiff_t(-ptrdiff_t(wrap_distance));
         }
 
         new (_buffer + (produce_pos & mask)) ptrdiff_t(length);

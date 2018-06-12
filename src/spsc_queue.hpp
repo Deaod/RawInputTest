@@ -4,13 +4,13 @@
 #include <cstddef>
 #include <utility>
 
-template<typename _element_type, int queue_size_log2, int align_log2>
+template<typename _element_type, int _queue_size_log2, int _align_log2 = 6>
 class spsc_queue {
-    static const auto queue_size = size_t(1) << queue_size_log2;
+    static const auto queue_size = size_t(1) << _queue_size_log2;
     static const auto index_mask = queue_size - 1;
 
 public:
-    static const auto align = size_t(1) << align_log2;
+    static const auto align = size_t(1) << _align_log2;
 
     // callback should place an instance of _element_type at the address that is passed to it.
     template<typename cbtype>
@@ -21,18 +21,7 @@ public:
         if ((produce_pos - consume_pos) >= queue_size)
             return false;
 
-        bool cbresult;
-        if constexpr (noexcept(callback(static_cast<void*>(nullptr)))) {
-            cbresult = callback(static_cast<void*>(_buffer + (produce_pos & index_mask) * sizeof(_element_type)));
-        } else {
-            try {
-                cbresult = callback(static_cast<void*>(_buffer + (produce_pos & index_mask) * sizeof(_element_type)));
-            } catch (...) {
-                throw;
-            }
-        }
-
-        if (cbresult) {
+        if (callback(static_cast<void*>(_buffer + (produce_pos & index_mask) * sizeof(_element_type)))) {
             _produce_pos.store(produce_pos + 1, std::memory_order_release);
             return true;
         }
