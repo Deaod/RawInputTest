@@ -25,11 +25,11 @@ struct spsc_ring_buffer {
 
         auto wrap_distance = size - (produce_pos & mask);
         if (wrap_distance < (rounded_length + sizeof(ptrdiff_t))) {
-            produce_pos += wrap_distance;
-            if ((produce_pos - consume_pos) > (size - (rounded_length + sizeof(ptrdiff_t))))
+            if ((produce_pos + wrap_distance - consume_pos) > (size - (rounded_length + sizeof(ptrdiff_t))))
                 return false;
 
             new (_buffer + (produce_pos & mask)) ptrdiff_t(-ptrdiff_t(wrap_distance));
+            produce_pos += wrap_distance;
         }
 
         new (_buffer + (produce_pos & mask)) ptrdiff_t(length);
