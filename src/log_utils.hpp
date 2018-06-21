@@ -17,7 +17,7 @@
 
 #define ON_FAIL_EVAL_TRACE(condition, eval, ...) \
 do {                                             \
-    const auto& _result = (condition);           \
+    const auto& _result_ = (condition);           \
     if (!(eval)) {                               \
         if (!LOG_ERR(__VA_ARGS__))               \
             DEBUG_BREAK;                         \
