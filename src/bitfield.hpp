@@ -25,13 +25,14 @@ public:
     using value_type = std::remove_volatile_t<base_type>;
     using storage_type = base_type;
 
-private:
     static_assert(std::is_integral_v<base_type>);
     static_assert(std::is_const_v<base_type> == false);
     static_assert(std::is_signed_v<value_type> == false);
     static_assert(first_bit <= last_bit);
     static_assert(last_bit < CHAR_BIT * sizeof(base_type));
 
+    static constexpr value_type FIRST_BIT = first_bit;
+    static constexpr value_type LAST_BIT = last_bit;
     static constexpr value_type NUM_BITS = last_bit - first_bit + 1;
     static constexpr value_type MASK = (static_cast<value_type>(1) << NUM_BITS) - 1;
 
