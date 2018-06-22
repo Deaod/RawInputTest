@@ -15,6 +15,7 @@
 #include "best_effort_logger.hpp"
 #include "log_utils.hpp"
 #include "spsc_ring_buffer.hpp"
+#include "spsc_queue.hpp"
 #include "cpuid.hpp"
 #include "simd_primitives.hpp"
 #include <utility>
@@ -32,17 +33,178 @@
 
 LRESULT CALLBACK input_wndproc(HWND, UINT, WPARAM, LPARAM);
 
-void input_thread_fn() {
+union VkVersion {
+    u32 all_bits;
+    bitfield<u32, 0, 11> patch;
+    bitfield<u32, 12, 21> minor;
+    bitfield<u32, 22, 31> major;
+};
+
+void main_loop(HWND window, HMODULE module) {
     threads::current::assign_id();
     belog::enable_logging();
 
-    VkInstance instance;
+    //////////////////////////////////////////////////////////////////////////
+
+    VkInstance                           instance;
+    VkPhysicalDevice                     physicalDevice;
+    VkPhysicalDeviceProperties           deviceProperties;
+    VkPhysicalDeviceFeatures             deviceFeatures;
+    VkPhysicalDeviceMemoryProperties     deviceMemoryProperties;
+    VkPhysicalDeviceFeatures             enabledFeatures{};
+    std::vector<VkQueueFamilyProperties> queueFamilyProperties;
+    std::vector<std::string>             supportedExtensions;
+    std::vector<VkDeviceQueueCreateInfo> queueCreateInfos{};
+    struct {
+        u32 graphics;
+        u32 compute;
+        u32 transfer;
+    }                                    queueFamilyIndices = { ~u32(0), ~u32(0), ~u32(0) };
+    VkDevice                             device;
+    VkFormat                             depthFormat = VK_FORMAT_MAX_ENUM;
+    struct {
+        // Swap chain image presentation
+        VkSemaphore presentComplete;
+        // Command buffer submission and execution
+        VkSemaphore renderComplete;
+        // UI overlay submission and execution
+        VkSemaphore overlayComplete;
+    }                                    semaphores;
+    VkSurfaceKHR                         surface;
+    VkFormat                             colorFormat = VK_FORMAT_MAX_ENUM;
+    VkColorSpaceKHR                      colorSpace = VK_COLOR_SPACE_MAX_ENUM_KHR;
+    VkQueue                              queue;
+    std::vector<VkPresentModeKHR>        presentModes;
+    /** @brief Handle to the current swap chain, required for recreation */
+    VkSwapchainKHR                       swapChain;
+    struct SwapChainBuffer {
+        VkImage image;
+        VkImageView view;
+    };
+    std::vector<SwapChainBuffer>         buffers;
+    u32                                  imageCount;
+    std::vector<VkCommandBuffer>         drawCmdBuffers;
+    struct {
+        VkImage image;
+        VkDeviceMemory mem;
+        VkImageView view;
+    }                                    depthStencil;
+    VkRenderPass                         renderPass;
+    VkPipelineCache                      pipelineCache;
+    std::vector<VkFramebuffer>           frameBuffers;
+    // Semaphores
+    // Used to coordinate operations within the graphics queue and ensure correct command ordering
+    VkSemaphore                          presentCompleteSemaphore;
+    VkSemaphore                          renderCompleteSemaphore;
+    // Fences
+    // Used to check the completion of queue operations (e.g. command buffer execution)
+    std::vector<VkFence>                 waitFences;
+    
+    struct Vertex {
+        float position[3];
+        float color[3];
+    };
+
+    struct {
+        VkDeviceMemory memory; // Handle to the device memory for this buffer
+        VkBuffer buffer;       // Handle to the Vulkan buffer object that the memory is bound to
+    }                                    vertices;
+
+    struct {
+        VkDeviceMemory memory;
+        VkBuffer buffer;
+        u32 count;
+    }                                    indices;
+
+    // Static data like vertex and index buffer should be stored on the device memory 
+    // for optimal (and fastest) access by the GPU
+    //
+    // To achieve this we use so-called "staging buffers" :
+    // - Create a buffer that's visible to the host (and can be mapped)
+    // - Copy the data to this buffer
+    // - Create another buffer that's local on the device (VRAM) with the same size
+    // - Copy the data from the host to the device using a command buffer
+    // - Delete the host visible (staging) buffer
+    // - Use the device local buffers for rendering
+
+    struct StagingBuffer {
+        VkDeviceMemory memory;
+        VkBuffer buffer;
+    };
+
+    struct {
+        StagingBuffer vertices;
+        StagingBuffer indices;
+    } stagingBuffers;
+
+    // Uniform buffer block object
+    struct {
+        VkDeviceMemory memory;
+        VkBuffer buffer;
+        VkDescriptorBufferInfo descriptor;
+    }  uniformBufferVS;
+
+    // For simplicity we use the same uniform block layout as in the shader:
+    //
+    //	layout(set = 0, binding = 0) uniform UBO
+    //	{
+    //		mat4 projectionMatrix;
+    //		mat4 modelMatrix;
+    //		mat4 viewMatrix;
+    //	} ubo;
+    //
+    // This way we can just memcopy the ubo data to the ubo
+    // Note: You should use data types that align with the GPU in order to avoid manual padding (vec4, mat4)
+    struct {
+        glm::mat4 projectionMatrix;
+        glm::mat4 modelMatrix;
+        glm::mat4 viewMatrix;
+    } uboVS;
+
+    glm::vec3 rotation = glm::vec3();
+    float zoom = -2.5f;
+
+    // The descriptor set layout describes the shader binding layout (without actually referencing descriptor)
+    // Like the pipeline layout it's pretty much a blueprint and can be used with different descriptor sets as long as their layout matches
+    VkDescriptorSetLayout descriptorSetLayout;
+
+    // The pipeline layout is used by a pipline to access the descriptor sets 
+    // It defines interface (without binding any actual data) between the shader stages used by the pipeline and the shader resources
+    // A pipeline layout can be shared among multiple pipelines as long as their interfaces match
+    VkPipelineLayout pipelineLayout;
+
+    // Pipelines (often called "pipeline state objects") are used to bake all states that affect a pipeline
+    // While in OpenGL every state can be changed at (almost) any time, Vulkan requires to layout the graphics (and compute) pipeline states upfront
+    // So for each combination of non-dynamic pipeline states you need a new pipeline (there are a few exceptions to this not discussed here)
+    // Even though this adds a new dimension of planing ahead, it's a great opportunity for performance optimizations by the driver
+    VkPipeline pipeline;
+
+    // Descriptor set pool
+    VkDescriptorPool descriptorPool = VK_NULL_HANDLE;
+
+    // The descriptor set stores the resources bound to the binding points in a shader
+    // It connects the binding points of the different shaders with the buffers and images used for those bindings
+    VkDescriptorSet descriptorSet;
+
     {
         VkApplicationInfo appInfo = {};
         appInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
         appInfo.pApplicationName = "RawInputTest";
         appInfo.pEngineName = "RawInputTest";
-        appInfo.apiVersion = VK_API_VERSION_1_1;
+
+        VK_GET_INSTANCE_PROC_ADDR(nullptr, vkEnumerateInstanceVersion);
+        if (vkEnumerateInstanceVersion != nullptr) {
+            u32 maxVersionSupported = VK_API_VERSION_1_1;
+            u32 versionSupported;
+            VK_ON_FAIL_RETURN_VOID(vkEnumerateInstanceVersion(&versionSupported));
+
+            appInfo.apiVersion = std::min(maxVersionSupported, versionSupported);
+        } else {
+            appInfo.apiVersion = VK_API_VERSION_1_0;
+        }
+
+        VkVersion ver{ appInfo.apiVersion };
+        LOG_INFO("Using Vulkan Version ", u32(ver.major), ".", u32(ver.minor), ".", u32(ver.patch));
 
         const char* instanceExtensions[] = { VK_KHR_SURFACE_EXTENSION_NAME, VK_KHR_WIN32_SURFACE_EXTENSION_NAME };
 
@@ -57,45 +219,35 @@ void input_thread_fn() {
         VK_ON_FAIL_RETURN_VOID(vkCreateInstance(&instanceCreateInfo, nullptr, &instance));
     }
 
-    VkPhysicalDevice physicalDevice;
     {
-        u32 gpuCount = 0;
-        VK_ON_FAIL_RETURN_VOID(vkEnumeratePhysicalDevices(instance, &gpuCount, nullptr));
-
-        std::vector<VkPhysicalDevice> physicalDevices(gpuCount);
-        VK_ON_FAIL_RETURN_VOID(vkEnumeratePhysicalDevices(instance, &gpuCount, physicalDevices.data()));
-
-        physicalDevice = physicalDevices[0];
+        u32 gpuCount = 1;
+        VK_ON_ERROR_RETURN_VOID(vkEnumeratePhysicalDevices(instance, &gpuCount, &physicalDevice));
     }
 
-    VkPhysicalDeviceProperties deviceProperties;
+    
     vkGetPhysicalDeviceProperties(physicalDevice, &deviceProperties);
-    VkPhysicalDeviceFeatures deviceFeatures;
     vkGetPhysicalDeviceFeatures(physicalDevice, &deviceFeatures);
-    VkPhysicalDeviceMemoryProperties deviceMemoryProperties;
     vkGetPhysicalDeviceMemoryProperties(physicalDevice, &deviceMemoryProperties);
 
     auto getMemoryTypeIndex = [&deviceMemoryProperties](u32 typeBits, VkMemoryPropertyFlags properties) {
-        for (u32 i = 0; i < deviceMemoryProperties.memoryTypeCount; i++) {
+        for (u32 i = 0; i < deviceMemoryProperties.memoryTypeCount; i++, typeBits >>= 1) {
             if ((typeBits & 1) == 1) {
                 if ((deviceMemoryProperties.memoryTypes[i].propertyFlags & properties) == properties) {
                     return i;
                 }
             }
-            typeBits >>= 1;
         }
 
         return ~u32(0);
     };
 
-    VkPhysicalDeviceFeatures enabledFeatures{};
-
-    u32 queueFamilyCount;
-    vkGetPhysicalDeviceQueueFamilyProperties(physicalDevice, &queueFamilyCount, nullptr);
-    std::vector<VkQueueFamilyProperties> queueFamilyProperties(queueFamilyCount);
-    vkGetPhysicalDeviceQueueFamilyProperties(physicalDevice, &queueFamilyCount, queueFamilyProperties.data());
-
-    std::vector<std::string> supportedExtensions;
+    {
+        u32 queueFamilyCount;
+        vkGetPhysicalDeviceQueueFamilyProperties(physicalDevice, &queueFamilyCount, nullptr);
+        queueFamilyProperties.resize(queueFamilyCount);
+        vkGetPhysicalDeviceQueueFamilyProperties(physicalDevice, &queueFamilyCount, queueFamilyProperties.data());
+    }
+    
     {
         u32 extCount = 0;
         vkEnumerateDeviceExtensionProperties(physicalDevice, nullptr, &extCount, nullptr);
@@ -109,15 +261,7 @@ void input_thread_fn() {
         }
     }
 
-    std::vector<VkDeviceQueueCreateInfo> queueCreateInfos{};
     const float defaultQueuePriority(0.0f);
-
-    struct {
-        u32 graphics;
-        u32 compute;
-        u32 transfer;
-    } queueFamilyIndices = { ~u32(0), ~u32(0), ~u32(0) };
-    VkDevice device;
 
     {
         for (u32 i = 0; i < u32(queueFamilyProperties.size()); i++) {
@@ -179,7 +323,6 @@ void input_thread_fn() {
         VK_ON_FAIL_RETURN_VOID(vkCreateDevice(physicalDevice, &deviceCreateInfo, nullptr, &device));
     }
 
-    VkFormat depthFormat = VK_FORMAT_MAX_ENUM;
     {
         VkFormat depthFormats[] = {
             VK_FORMAT_D32_SFLOAT_S8_UINT,
@@ -215,120 +358,46 @@ void input_thread_fn() {
     [[maybe_unused]] VK_GET_DEVICE_PROC_ADDR(device, vkAcquireNextImageKHR);
     [[maybe_unused]] VK_GET_DEVICE_PROC_ADDR(device, vkQueuePresentKHR);
 
-    struct {
-        // Swap chain image presentation
-        VkSemaphore presentComplete;
-        // Command buffer submission and execution
-        VkSemaphore renderComplete;
-        // UI overlay submission and execution
-        VkSemaphore overlayComplete;
-    } semaphores;
-
     {
         VkSemaphoreCreateInfo semaphoreCreateInfo{};
         semaphoreCreateInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
 
         // Create a semaphore used to synchronize image presentation
-        // Ensures that the image is displayed before we start submitting new commands to the queu
+        // Ensures that the image is displayed before we start submitting new commands to the queue
         VK_ON_FAIL_RETURN_VOID(vkCreateSemaphore(device, &semaphoreCreateInfo, nullptr, &semaphores.presentComplete));
 
         // Create a semaphore used to synchronize command submission
-        // Ensures that the image is not presented until all commands have been sumbitted and executed
+        // Ensures that the image is not presented until all commands have been submitted and executed
         VK_ON_FAIL_RETURN_VOID(vkCreateSemaphore(device, &semaphoreCreateInfo, nullptr, &semaphores.renderComplete));
 
         // Create a semaphore used to synchronize command submission
-        // Ensures that the image is not presented until all commands for the UI overlay have been sumbitted and executed
+        // Ensures that the image is not presented until all commands for the UI overlay have been submitted and executed
         // Will be inserted after the render complete semaphore if the UI overlay is enabled
         VK_ON_FAIL_RETURN_VOID(vkCreateSemaphore(device, &semaphoreCreateInfo, nullptr, &semaphores.overlayComplete));
     }
 
-    VkPipelineStageFlags submitPipelineStages = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    {
+        VkPipelineStageFlags submitPipelineStages = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+        VkSubmitInfo submitInfo{};
+        submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+        submitInfo.pWaitDstStageMask = &submitPipelineStages;
+        submitInfo.waitSemaphoreCount = 1;
+        submitInfo.pWaitSemaphores = &semaphores.presentComplete;
+        submitInfo.signalSemaphoreCount = 1;
+        submitInfo.pSignalSemaphores = &semaphores.renderComplete;
+    }
 
-    VkSubmitInfo submitInfo{};
-    submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-    submitInfo.pWaitDstStageMask = &submitPipelineStages;
-    submitInfo.waitSemaphoreCount = 1;
-    submitInfo.pWaitSemaphores = &semaphores.presentComplete;
-    submitInfo.signalSemaphoreCount = 1;
-    submitInfo.pSignalSemaphores = &semaphores.renderComplete;
-
-    HWND input_capture_window;
-    WNDCLASSEX input_capture_class;
-
-    auto module_handle = GetModuleHandle(nullptr);
-    auto monitor_handle = MonitorFromPoint(POINT{ 0, 0 }, MONITOR_DEFAULTTONEAREST);
-    auto background = CreateSolidBrush(RGB(0, 0, 0));
-
-    input_capture_class.cbSize = sizeof(input_capture_class);
-    input_capture_class.style = CS_HREDRAW | CS_VREDRAW;
-    input_capture_class.lpfnWndProc = input_wndproc;
-    input_capture_class.cbClsExtra = 0;
-    input_capture_class.cbWndExtra = 0;
-    input_capture_class.hInstance = module_handle;
-    input_capture_class.hIcon = nullptr;
-    input_capture_class.hCursor = nullptr;
-    input_capture_class.hbrBackground = background;
-    input_capture_class.lpszMenuName = nullptr;
-    input_capture_class.lpszClassName = TEXT("InputCapture");
-    input_capture_class.hIconSm = nullptr;
-    auto input_capture_class_atom = RegisterClassEx(&input_capture_class);
-    ON_FAIL_TRACE_RETURN_VOID(
-        input_capture_class_atom,
-        "failed to register class ", GetLastError()
-    );
-
-    MONITORINFOEX monitor_info = { sizeof(monitor_info) };
-    ON_FAIL_TRACE_RETURN_VOID(
-        GetMonitorInfo(monitor_handle, &monitor_info),
-        "failed to query monitor info ", GetLastError()
-    );
-
-    input_capture_window = CreateWindow(
-        TEXT("InputCapture"), // window class name
-        TEXT("InputCapture"), // window caption
-        WS_POPUP | WS_VISIBLE,// window style
-        monitor_info.rcMonitor.left,                                // initial x position
-        monitor_info.rcMonitor.top,                                 // initial y position
-        monitor_info.rcMonitor.right - monitor_info.rcMonitor.left, // initial x size
-        monitor_info.rcMonitor.bottom - monitor_info.rcMonitor.top, // initial y size
-        nullptr,              // parent window handle
-        nullptr,              // window menu handle
-        module_handle,        // program instance handle
-        nullptr               // creation parameters
-    );
-    ON_FAIL_TRACE_RETURN_VOID(
-        input_capture_window != nullptr,
-        "failed to create window ", GetLastError()
-    );
-
-    RAWINPUTDEVICE devices[2];
-
-    devices[0].usUsagePage = 0x01;
-    devices[0].usUsage = 0x02;
-    devices[0].dwFlags = RIDEV_NOLEGACY;   // adds HID mouse and also ignores legacy mouse messages
-    devices[0].hwndTarget = input_capture_window;
-
-    devices[1].usUsagePage = 0x01;
-    devices[1].usUsage = 0x06;
-    devices[1].dwFlags = RIDEV_NOLEGACY;   // adds HID keyboard and also ignores legacy keyboard messages
-    devices[1].hwndTarget = input_capture_window;
-
-    ON_FAIL_TRACE_RETURN_VOID(
-        RegisterRawInputDevices(devices, 2, sizeof(RAWINPUTDEVICE)),
-        "failed to register for raw input ", GetLastError()
-    );
-
-    VkSurfaceKHR surface;
-
-    VkWin32SurfaceCreateInfoKHR surfaceCreateInfo = {};
-    surfaceCreateInfo.sType = VK_STRUCTURE_TYPE_WIN32_SURFACE_CREATE_INFO_KHR;
-    surfaceCreateInfo.hinstance = module_handle;
-    surfaceCreateInfo.hwnd = input_capture_window;
-    VK_ON_FAIL_RETURN_VOID(vkCreateWin32SurfaceKHR(instance, &surfaceCreateInfo, nullptr, &surface));
+    {
+        VkWin32SurfaceCreateInfoKHR surfaceCreateInfo = {};
+        surfaceCreateInfo.sType = VK_STRUCTURE_TYPE_WIN32_SURFACE_CREATE_INFO_KHR;
+        surfaceCreateInfo.hinstance = module;
+        surfaceCreateInfo.hwnd = window;
+        VK_ON_FAIL_RETURN_VOID(vkCreateWin32SurfaceKHR(instance, &surfaceCreateInfo, nullptr, &surface));
+    }
 
     u32 queueNodeIndex = ~u32(0);
 
-    for (u32 queueFamilyIndex = 0; queueFamilyIndex < queueFamilyCount; queueFamilyIndex++) {
+    for (u32 queueFamilyIndex = 0; queueFamilyIndex < queueFamilyProperties.size(); queueFamilyIndex++) {
         VkBool32 supportsPresent;
         vkGetPhysicalDeviceSurfaceSupportKHR(physicalDevice, queueFamilyIndex, surface, &supportsPresent);
         if (((queueFamilyProperties[queueFamilyIndex].queueFlags & VK_QUEUE_GRAPHICS_BIT) != 0) && supportsPresent) {
@@ -347,11 +416,9 @@ void input_thread_fn() {
     std::vector<VkSurfaceFormatKHR> surfaceFormats(formatCount);
     VK_ON_FAIL_RETURN_VOID(vkGetPhysicalDeviceSurfaceFormatsKHR(physicalDevice, surface, &formatCount, surfaceFormats.data()));
 
-    VkFormat colorFormat = VK_FORMAT_MAX_ENUM;
-    VkColorSpaceKHR colorSpace = VK_COLOR_SPACE_MAX_ENUM_KHR;
     {
         // If the surface format list only includes one entry with VK_FORMAT_UNDEFINED,
-        // there is no preferered format, so we assume VK_FORMAT_B8G8R8A8_UNORM
+        // there is no preferred format, so we assume VK_FORMAT_B8G8R8A8_UNORM
         if ((formatCount == 1) && (surfaceFormats[0].format == VK_FORMAT_UNDEFINED)) {
             colorFormat = VK_FORMAT_B8G8R8A8_UNORM;
             colorSpace = surfaceFormats[0].colorSpace;
@@ -377,7 +444,6 @@ void input_thread_fn() {
         }
     }
 
-    VkQueue queue;
     vkGetDeviceQueue(device, queueNodeIndex, 0, &queue);
 
     VkCommandPoolCreateInfo cmdPoolInfo = {};
@@ -434,23 +500,23 @@ void input_thread_fn() {
     };
 
     RECT windowRect;
-    ON_FAIL_TRACE_RETURN_VOID(GetWindowRect(input_capture_window, &windowRect), "Failed to get window rect: ", GetLastError());
+    ON_FAIL_TRACE_RETURN_VOID(GetWindowRect(window, &windowRect), "Failed to get window rect: ", GetLastError());
 
     u32 width = windowRect.right - windowRect.left;
     u32 height = windowRect.bottom - windowRect.top;
 
-    VkSurfaceCapabilitiesKHR surfCaps;
-    VK_ON_FAIL_RETURN_VOID(vkGetPhysicalDeviceSurfaceCapabilitiesKHR(physicalDevice, surface, &surfCaps));
-
-    u32 presentModeCount;
-    VK_ON_FAIL_RETURN_VOID(vkGetPhysicalDeviceSurfacePresentModesKHR(physicalDevice, surface, &presentModeCount, nullptr));
-
-    std::vector<VkPresentModeKHR> presentModes(presentModeCount);
-    VK_ON_FAIL_RETURN_VOID(vkGetPhysicalDeviceSurfacePresentModesKHR(physicalDevice, surface, &presentModeCount, presentModes.data()));
-
-    /** @brief Handle to the current swap chain, required for recreation */
-    VkSwapchainKHR swapChain;
     {
+        u32 presentModeCount;
+        VK_ON_FAIL_RETURN_VOID(vkGetPhysicalDeviceSurfacePresentModesKHR(physicalDevice, surface, &presentModeCount, nullptr));
+
+        presentModes.resize(presentModeCount);
+        VK_ON_FAIL_RETURN_VOID(vkGetPhysicalDeviceSurfacePresentModesKHR(physicalDevice, surface, &presentModeCount, presentModes.data()));
+    }
+
+    {
+        VkSurfaceCapabilitiesKHR surfCaps;
+        VK_ON_FAIL_RETURN_VOID(vkGetPhysicalDeviceSurfaceCapabilitiesKHR(physicalDevice, surface, &surfCaps));
+
         VkExtent2D swapchainExtent = {};
         // If width (and height) equals the special value 0xFFFFFFFF, the size of the surface will be set by the swapchain
         if (surfCaps.currentExtent.width == ~u32(0)) {
@@ -470,11 +536,11 @@ void input_thread_fn() {
         VkPresentModeKHR swapchainPresentMode = VK_PRESENT_MODE_FIFO_KHR;
         // Try to find a immediate mode, use mailbox mode as fallback.
         // It's the lowest latency present mode available
-        for (size_t i = 0; i < presentModeCount; i++) {
-            if (presentModes[i] == VK_PRESENT_MODE_MAILBOX_KHR) {
+        for (auto mode : presentModes) {
+            if (mode == VK_PRESENT_MODE_MAILBOX_KHR) {
                 swapchainPresentMode = VK_PRESENT_MODE_MAILBOX_KHR;
             }
-            if (presentModes[i] == VK_PRESENT_MODE_IMMEDIATE_KHR) {
+            if (mode == VK_PRESENT_MODE_IMMEDIATE_KHR) {
                 swapchainPresentMode = VK_PRESENT_MODE_IMMEDIATE_KHR;
                 break;
             }
@@ -540,16 +606,13 @@ void input_thread_fn() {
         VK_ON_FAIL_RETURN_VOID(vkCreateSwapchainKHR(device, &swapchainCI, nullptr, &swapChain));
     }
 
-    u32 imageCount;
-    VK_ON_FAIL_RETURN_VOID(vkGetSwapchainImagesKHR(device, swapChain, &imageCount, nullptr));
-    std::vector<VkImage> images(imageCount);
-    VK_ON_FAIL_RETURN_VOID(vkGetSwapchainImagesKHR(device, swapChain, &imageCount, images.data()));
-    struct SwapChainBuffer {
-        VkImage image;
-        VkImageView view;
-    };
-    std::vector<SwapChainBuffer> buffers(imageCount);
     {
+        VK_ON_FAIL_RETURN_VOID(vkGetSwapchainImagesKHR(device, swapChain, &imageCount, nullptr));
+        std::vector<VkImage> images(imageCount);
+        VK_ON_FAIL_RETURN_VOID(vkGetSwapchainImagesKHR(device, swapChain, &imageCount, images.data()));
+
+        buffers.resize(imageCount);
+    
         for (uint32_t i = 0; i < imageCount; i++) {
             VkImageViewCreateInfo colorAttachmentView = {};
             colorAttachmentView.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
@@ -577,7 +640,7 @@ void input_thread_fn() {
         }
     }
 
-    std::vector<VkCommandBuffer> drawCmdBuffers(imageCount);
+    drawCmdBuffers.resize(imageCount);
     {
         VkCommandBufferAllocateInfo cmdBufAllocateInfo = {};
         cmdBufAllocateInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
@@ -586,12 +649,6 @@ void input_thread_fn() {
         cmdBufAllocateInfo.commandBufferCount = imageCount;
         VK_ON_FAIL_RETURN_VOID(vkAllocateCommandBuffers(device, &cmdBufAllocateInfo, drawCmdBuffers.data()));
     }
-
-    struct {
-        VkImage image;
-        VkDeviceMemory mem;
-        VkImageView view;
-    } depthStencil;
 
     {
         VkImageCreateInfo image = {};
@@ -640,7 +697,6 @@ void input_thread_fn() {
         VK_ON_FAIL_RETURN_VOID(vkCreateImageView(device, &depthStencilView, nullptr, &depthStencil.view));
     }
 
-    VkRenderPass renderPass;
     {
         std::array<VkAttachmentDescription, 2> attachments = {};
         // Color attachment
@@ -712,14 +768,14 @@ void input_thread_fn() {
         VK_ON_FAIL_RETURN_VOID(vkCreateRenderPass(device, &renderPassInfo, nullptr, &renderPass));
     }
 
-    VkPipelineCache pipelineCache;
+    
     {
         VkPipelineCacheCreateInfo pipelineCacheCreateInfo = {};
         pipelineCacheCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO;
         VK_ON_FAIL_RETURN_VOID(vkCreatePipelineCache(device, &pipelineCacheCreateInfo, nullptr, &pipelineCache));
     }
 
-    std::vector<VkFramebuffer> frameBuffers(imageCount);
+    frameBuffers.resize(imageCount);
     {
         VkImageView attachments[2];
 
@@ -744,13 +800,8 @@ void input_thread_fn() {
         }
     }
 
-    // Semaphores
-    // Used to coordinate operations within the graphics queue and ensure correct command ordering
-    VkSemaphore presentCompleteSemaphore;
-    VkSemaphore renderCompleteSemaphore;
-    // Fences
-    // Used to check the completion of queue operations (e.g. command buffer execution)
-    std::vector<VkFence> waitFences(imageCount);
+    
+    waitFences.resize(imageCount);
     {
         // Semaphores (Used for correct command ordering)
         VkSemaphoreCreateInfo semaphoreCreateInfo = {};
@@ -772,43 +823,6 @@ void input_thread_fn() {
             VK_ON_FAIL_RETURN_VOID(vkCreateFence(device, &fenceCreateInfo, nullptr, &fence));
         }
     }
-
-    struct Vertex {
-        float position[3];
-        float color[3];
-    };
-
-    struct {
-        VkDeviceMemory memory; // Handle to the device memory for this buffer
-        VkBuffer buffer;       // Handle to the Vulkan buffer object that the memory is bound to
-    } vertices;
-
-    struct {
-        VkDeviceMemory memory;
-        VkBuffer buffer;
-        u32 count;
-    } indices;
-
-    // Static data like vertex and index buffer should be stored on the device memory 
-    // for optimal (and fastest) access by the GPU
-    //
-    // To achieve this we use so-called "staging buffers" :
-    // - Create a buffer that's visible to the host (and can be mapped)
-    // - Copy the data to this buffer
-    // - Create another buffer that's local on the device (VRAM) with the same size
-    // - Copy the data from the host to the device using a command buffer
-    // - Delete the host visible (staging) buffer
-    // - Use the device local buffers for rendering
-
-    struct StagingBuffer {
-        VkDeviceMemory memory;
-        VkBuffer buffer;
-    };
-
-    struct {
-        StagingBuffer vertices;
-        StagingBuffer indices;
-    } stagingBuffers;
 
     {
         // Setup vertices
@@ -912,34 +926,8 @@ void input_thread_fn() {
         vkFreeMemory(device, stagingBuffers.vertices.memory, nullptr);
         vkDestroyBuffer(device, stagingBuffers.indices.buffer, nullptr);
         vkFreeMemory(device, stagingBuffers.indices.memory, nullptr);
-        }
-    // Uniform buffer block object
-    struct {
-        VkDeviceMemory memory;
-        VkBuffer buffer;
-        VkDescriptorBufferInfo descriptor;
-    }  uniformBufferVS;
-
-    // For simplicity we use the same uniform block layout as in the shader:
-    //
-    //	layout(set = 0, binding = 0) uniform UBO
-    //	{
-    //		mat4 projectionMatrix;
-    //		mat4 modelMatrix;
-    //		mat4 viewMatrix;
-    //	} ubo;
-    //
-    // This way we can just memcopy the ubo data to the ubo
-    // Note: You should use data types that align with the GPU in order to avoid manual padding (vec4, mat4)
-    struct {
-        glm::mat4 projectionMatrix;
-        glm::mat4 modelMatrix;
-        glm::mat4 viewMatrix;
-    } uboVS;
-
-    glm::vec3 rotation = glm::vec3();
-    float zoom = -2.5f;
-
+    }
+    
     {
         // Prepare and initialize a uniform buffer block containing shader uniforms
         // Single uniforms like in OpenGL are no longer present in Vulkan. All Shader uniforms are passed via uniform buffer blocks
@@ -997,20 +985,491 @@ void input_thread_fn() {
     // Note: Since we requested a host coherent memory type for the uniform buffer, the write is instantly visible to the GPU
     vkUnmapMemory(device, uniformBufferVS.memory);
 
-    //////////////////////////////////////////////////////////////////////////
-    //////////////////////////////////////////////////////////////////////////
-    //////////////////////////////////////////////////////////////////////////
+    {
+        // Setup layout of descriptors used in this example
+        // Basically connects the different shader stages to descriptors for binding uniform buffers, image samplers, etc.
+        // So every shader binding should map to one descriptor set layout binding
 
-    MSG msg;
-    BOOL bRet;
+        // Binding 0: Uniform buffer (Vertex shader)
+        VkDescriptorSetLayoutBinding layoutBinding = {};
+        layoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        layoutBinding.descriptorCount = 1;
+        layoutBinding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+        layoutBinding.pImmutableSamplers = nullptr;
 
-    while ((bRet = GetMessage(&msg, nullptr, 0, 0)) != 0) {
-        ON_FAIL_RETURN_VOID(bRet != -1);
+        VkDescriptorSetLayoutCreateInfo descriptorLayout = {};
+        descriptorLayout.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+        descriptorLayout.pNext = nullptr;
+        descriptorLayout.bindingCount = 1;
+        descriptorLayout.pBindings = &layoutBinding;
 
-        TranslateMessage(&msg);
-        DispatchMessage(&msg);
+        VK_ON_FAIL_RETURN_VOID(vkCreateDescriptorSetLayout(device, &descriptorLayout, nullptr, &descriptorSetLayout));
+
+        // Create the pipeline layout that is used to generate the rendering pipelines that are based on this descriptor set layout
+        // In a more complex scenario you would have different pipeline layouts for different descriptor set layouts that could be reused
+        VkPipelineLayoutCreateInfo pPipelineLayoutCreateInfo = {};
+        pPipelineLayoutCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+        pPipelineLayoutCreateInfo.pNext = nullptr;
+        pPipelineLayoutCreateInfo.setLayoutCount = 1;
+        pPipelineLayoutCreateInfo.pSetLayouts = &descriptorSetLayout;
+
+        VK_ON_FAIL_RETURN_VOID(vkCreatePipelineLayout(device, &pPipelineLayoutCreateInfo, nullptr, &pipelineLayout));
+    }
+
+    auto createShaderModule = [&device](const auto& shaderCode) -> VkShaderModule {
+        // Create a new shader module that will be used for pipeline creation
+        VkShaderModuleCreateInfo moduleCreateInfo{};
+        moduleCreateInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+        moduleCreateInfo.codeSize = sizeof(shaderCode);
+        moduleCreateInfo.pCode = (uint32_t*) shaderCode;
+
+        VkShaderModule shaderModule;
+        VK_ON_FAIL_RETURN(vkCreateShaderModule(device, &moduleCreateInfo, nullptr, &shaderModule), nullptr);
+
+        return shaderModule;
+    };
+
+    {
+        // Create the graphics pipeline used in this example
+        // Vulkan uses the concept of rendering pipelines to encapsulate fixed states, replacing OpenGL's complex state machine
+        // A pipeline is then stored and hashed on the GPU making pipeline changes very fast
+        // Note: There are still a few dynamic states that are not directly part of the pipeline (but the info that they are used is)
+
+        VkGraphicsPipelineCreateInfo pipelineCreateInfo = {};
+        pipelineCreateInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+        // The layout used for this pipeline (can be shared among multiple pipelines using the same layout)
+        pipelineCreateInfo.layout = pipelineLayout;
+        // Renderpass this pipeline is attached to
+        pipelineCreateInfo.renderPass = renderPass;
+
+        // Construct the differnent states making up the pipeline
+
+        // Input assembly state describes how primitives are assembled
+        // This pipeline will assemble vertex data as a triangle lists (though we only use one triangle)
+        VkPipelineInputAssemblyStateCreateInfo inputAssemblyState = {};
+        inputAssemblyState.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
+        inputAssemblyState.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+
+        // Rasterization state
+        VkPipelineRasterizationStateCreateInfo rasterizationState = {};
+        rasterizationState.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
+        rasterizationState.polygonMode = VK_POLYGON_MODE_FILL;
+        rasterizationState.cullMode = VK_CULL_MODE_NONE;
+        rasterizationState.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+        rasterizationState.depthClampEnable = VK_FALSE;
+        rasterizationState.rasterizerDiscardEnable = VK_FALSE;
+        rasterizationState.depthBiasEnable = VK_FALSE;
+        rasterizationState.lineWidth = 1.0f;
+
+        // Color blend state describes how blend factors are calculated (if used)
+        // We need one blend attachment state per color attachment (even if blending is not used
+        VkPipelineColorBlendAttachmentState blendAttachmentState[1] = {};
+        blendAttachmentState[0].colorWriteMask = 0xf;
+        blendAttachmentState[0].blendEnable = VK_FALSE;
+        VkPipelineColorBlendStateCreateInfo colorBlendState = {};
+        colorBlendState.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
+        colorBlendState.attachmentCount = 1;
+        colorBlendState.pAttachments = blendAttachmentState;
+
+        // Viewport state sets the number of viewports and scissor used in this pipeline
+        // Note: This is actually overriden by the dynamic states (see below)
+        VkPipelineViewportStateCreateInfo viewportState = {};
+        viewportState.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
+        viewportState.viewportCount = 1;
+        viewportState.scissorCount = 1;
+
+        // Enable dynamic states
+        // Most states are baked into the pipeline, but there are still a few dynamic states that can be changed within a command buffer
+        // To be able to change these we need do specify which dynamic states will be changed using this pipeline. Their actual states are set later on in the command buffer.
+        // For this example we will set the viewport and scissor using dynamic states
+        std::vector<VkDynamicState> dynamicStateEnables;
+        dynamicStateEnables.push_back(VK_DYNAMIC_STATE_VIEWPORT);
+        dynamicStateEnables.push_back(VK_DYNAMIC_STATE_SCISSOR);
+        VkPipelineDynamicStateCreateInfo dynamicState = {};
+        dynamicState.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
+        dynamicState.pDynamicStates = dynamicStateEnables.data();
+        dynamicState.dynamicStateCount = static_cast<uint32_t>(dynamicStateEnables.size());
+
+        // Depth and stencil state containing depth and stencil compare and test operations
+        // We only use depth tests and want depth tests and writes to be enabled and compare with less or equal
+        VkPipelineDepthStencilStateCreateInfo depthStencilState = {};
+        depthStencilState.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
+        depthStencilState.depthTestEnable = VK_TRUE;
+        depthStencilState.depthWriteEnable = VK_TRUE;
+        depthStencilState.depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
+        depthStencilState.depthBoundsTestEnable = VK_FALSE;
+        depthStencilState.back.failOp = VK_STENCIL_OP_KEEP;
+        depthStencilState.back.passOp = VK_STENCIL_OP_KEEP;
+        depthStencilState.back.compareOp = VK_COMPARE_OP_ALWAYS;
+        depthStencilState.stencilTestEnable = VK_FALSE;
+        depthStencilState.front = depthStencilState.back;
+
+        // Multi sampling state
+        // This example does not make use fo multi sampling (for anti-aliasing), the state must still be set and passed to the pipeline
+        VkPipelineMultisampleStateCreateInfo multisampleState = {};
+        multisampleState.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
+        multisampleState.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+        multisampleState.pSampleMask = nullptr;
+
+        // Vertex input descriptions 
+        // Specifies the vertex input parameters for a pipeline
+
+        // Vertex input binding
+        // This example uses a single vertex input binding at binding point 0 (see vkCmdBindVertexBuffers)
+        VkVertexInputBindingDescription vertexInputBinding = {};
+        vertexInputBinding.binding = 0;
+        vertexInputBinding.stride = sizeof(Vertex);
+        vertexInputBinding.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
+
+        // Inpute attribute bindings describe shader attribute locations and memory layouts
+        std::array<VkVertexInputAttributeDescription, 2> vertexInputAttributs;
+        // These match the following shader layout (see triangle.vert):
+        //	layout (location = 0) in vec3 inPos;
+        //	layout (location = 1) in vec3 inColor;
+        // Attribute location 0: Position
+        vertexInputAttributs[0].binding = 0;
+        vertexInputAttributs[0].location = 0;
+        // Position attribute is three 32 bit signed (SFLOAT) floats (R32 G32 B32)
+        vertexInputAttributs[0].format = VK_FORMAT_R32G32B32_SFLOAT;
+        vertexInputAttributs[0].offset = offsetof(Vertex, position);
+        // Attribute location 1: Color
+        vertexInputAttributs[1].binding = 0;
+        vertexInputAttributs[1].location = 1;
+        // Color attribute is three 32 bit signed (SFLOAT) floats (R32 G32 B32)
+        vertexInputAttributs[1].format = VK_FORMAT_R32G32B32_SFLOAT;
+        vertexInputAttributs[1].offset = offsetof(Vertex, color);
+
+        // Vertex input state used for pipeline creation
+        VkPipelineVertexInputStateCreateInfo vertexInputState = {};
+        vertexInputState.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+        vertexInputState.vertexBindingDescriptionCount = 1;
+        vertexInputState.pVertexBindingDescriptions = &vertexInputBinding;
+        vertexInputState.vertexAttributeDescriptionCount = 2;
+        vertexInputState.pVertexAttributeDescriptions = vertexInputAttributs.data();
+
+        // Shaders
+        std::array<VkPipelineShaderStageCreateInfo, 2> shaderStages{};
+
+        auto vertShader = createShaderModule(R"glsl(
+#version 450
+
+#extension GL_ARB_separate_shader_objects : enable
+#extension GL_ARB_shading_language_420pack : enable
+
+layout (location = 0) in vec3 inPos;
+layout (location = 1) in vec3 inColor;
+
+layout (binding = 0) uniform UBO 
+{
+    mat4 projectionMatrix;
+    mat4 modelMatrix;
+    mat4 viewMatrix;
+} ubo;
+
+layout (location = 0) out vec3 outColor;
+
+out gl_PerVertex 
+{
+    vec4 gl_Position;   
+};
+
+
+void main() 
+{
+    outColor = inColor;
+    gl_Position = ubo.projectionMatrix * ubo.viewMatrix * ubo.modelMatrix * vec4(inPos.xyz, 1.0);
+}
+)glsl");
+        ON_FAIL_RETURN_VOID(vertShader != nullptr);
+
+        // Vertex shader
+        shaderStages[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+        // Set pipeline stage for this shader
+        shaderStages[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
+        // Load binary SPIR-V shader
+        shaderStages[0].module = vertShader;
+        // Main entry point for the shader
+        shaderStages[0].pName = "main";
+        assert(shaderStages[0].module != VK_NULL_HANDLE);
+
+        auto fragShader = createShaderModule(R"glsl(
+#version 450
+
+#extension GL_ARB_separate_shader_objects : enable
+#extension GL_ARB_shading_language_420pack : enable
+
+layout (location = 0) in vec3 inColor;
+
+layout (location = 0) out vec4 outFragColor;
+
+void main() 
+{
+    outFragColor = vec4(inColor, 1.0);
+})glsl");
+        ON_FAIL_RETURN_VOID(fragShader != nullptr);
+
+        // Fragment shader
+        shaderStages[1].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+        // Set pipeline stage for this shader
+        shaderStages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+        // Load binary SPIR-V shader
+        shaderStages[1].module = fragShader;
+        // Main entry point for the shader
+        shaderStages[1].pName = "main";
+        assert(shaderStages[1].module != VK_NULL_HANDLE);
+
+        // Set pipeline shader stage info
+        pipelineCreateInfo.stageCount = static_cast<uint32_t>(shaderStages.size());
+        pipelineCreateInfo.pStages = shaderStages.data();
+
+        // Assign the pipeline states to the pipeline creation info structure
+        pipelineCreateInfo.pVertexInputState = &vertexInputState;
+        pipelineCreateInfo.pInputAssemblyState = &inputAssemblyState;
+        pipelineCreateInfo.pRasterizationState = &rasterizationState;
+        pipelineCreateInfo.pColorBlendState = &colorBlendState;
+        pipelineCreateInfo.pMultisampleState = &multisampleState;
+        pipelineCreateInfo.pViewportState = &viewportState;
+        pipelineCreateInfo.pDepthStencilState = &depthStencilState;
+        pipelineCreateInfo.renderPass = renderPass;
+        pipelineCreateInfo.pDynamicState = &dynamicState;
+
+        // Create rendering pipeline using the specified states
+        VK_ON_FAIL_RETURN_VOID(vkCreateGraphicsPipelines(device, pipelineCache, 1, &pipelineCreateInfo, nullptr, &pipeline));
+
+        // Shader modules are no longer needed once the graphics pipeline has been created
+        vkDestroyShaderModule(device, shaderStages[0].module, nullptr);
+        vkDestroyShaderModule(device, shaderStages[1].module, nullptr);
+    }
+
+    
+    {
+        // We need to tell the API the number of max. requested descriptors per type
+        VkDescriptorPoolSize typeCounts[1];
+        // This example only uses one descriptor type (uniform buffer) and only requests one descriptor of this type
+        typeCounts[0].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        typeCounts[0].descriptorCount = 1;
+        // For additional types you need to add new entries in the type count list
+        // E.g. for two combined image samplers :
+        // typeCounts[1].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        // typeCounts[1].descriptorCount = 2;
+
+        // Create the global descriptor pool
+        // All descriptors used in this example are allocated from this pool
+        VkDescriptorPoolCreateInfo descriptorPoolInfo = {};
+        descriptorPoolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+        descriptorPoolInfo.pNext = nullptr;
+        descriptorPoolInfo.poolSizeCount = 1;
+        descriptorPoolInfo.pPoolSizes = typeCounts;
+        // Set the max. number of descriptor sets that can be requested from this pool (requesting beyond this limit will result in an error)
+        descriptorPoolInfo.maxSets = 1;
+
+        VK_ON_FAIL_RETURN_VOID(vkCreateDescriptorPool(device, &descriptorPoolInfo, nullptr, &descriptorPool));
+    }
+
+    {
+        // Allocate a new descriptor set from the global descriptor pool
+        VkDescriptorSetAllocateInfo allocInfo = {};
+        allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+        allocInfo.descriptorPool = descriptorPool;
+        allocInfo.descriptorSetCount = 1;
+        allocInfo.pSetLayouts = &descriptorSetLayout;
+
+        VK_ON_FAIL_RETURN_VOID(vkAllocateDescriptorSets(device, &allocInfo, &descriptorSet));
+
+        // Update the descriptor set determining the shader binding points
+        // For every binding point used in a shader there needs to be one
+        // descriptor set matching that binding point
+
+        VkWriteDescriptorSet writeDescriptorSet = {};
+
+        // Binding 0 : Uniform buffer
+        writeDescriptorSet.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        writeDescriptorSet.dstSet = descriptorSet;
+        writeDescriptorSet.descriptorCount = 1;
+        writeDescriptorSet.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        writeDescriptorSet.pBufferInfo = &uniformBufferVS.descriptor;
+        // Binds this uniform buffer to binding point 0
+        writeDescriptorSet.dstBinding = 0;
+
+        vkUpdateDescriptorSets(device, 1, &writeDescriptorSet, 0, nullptr);
+    }
+
+    {
+        VkCommandBufferBeginInfo cmdBufInfo = {};
+        cmdBufInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+        cmdBufInfo.pNext = nullptr;
+
+        // Set clear values for all framebuffer attachments with loadOp set to clear
+        // We use two attachments (color and depth) that are cleared at the start of the subpass and as such we need to set clear values for both
+        VkClearValue clearValues[2];
+        clearValues[0].color = { { 0.0f, 0.0f, 0.2f, 1.0f } };
+        clearValues[1].depthStencil = { 1.0f, 0 };
+
+        VkRenderPassBeginInfo renderPassBeginInfo = {};
+        renderPassBeginInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+        renderPassBeginInfo.pNext = nullptr;
+        renderPassBeginInfo.renderPass = renderPass;
+        renderPassBeginInfo.renderArea.offset.x = 0;
+        renderPassBeginInfo.renderArea.offset.y = 0;
+        renderPassBeginInfo.renderArea.extent.width = width;
+        renderPassBeginInfo.renderArea.extent.height = height;
+        renderPassBeginInfo.clearValueCount = 2;
+        renderPassBeginInfo.pClearValues = clearValues;
+
+        for (size_t i = 0; i < drawCmdBuffers.size(); ++i) {
+            // Set target frame buffer
+            renderPassBeginInfo.framebuffer = frameBuffers[i];
+
+            VK_ON_FAIL_RETURN_VOID(vkBeginCommandBuffer(drawCmdBuffers[i], &cmdBufInfo));
+
+            // Start the first sub pass specified in our default render pass setup by the base class
+            // This will clear the color and depth attachment
+            vkCmdBeginRenderPass(drawCmdBuffers[i], &renderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
+
+            // Update dynamic viewport state
+            VkViewport viewport = {};
+            viewport.height = (float) height;
+            viewport.width = (float) width;
+            viewport.minDepth = (float) 0.0f;
+            viewport.maxDepth = (float) 1.0f;
+            vkCmdSetViewport(drawCmdBuffers[i], 0, 1, &viewport);
+
+            // Update dynamic scissor state
+            VkRect2D scissor = {};
+            scissor.extent.width = width;
+            scissor.extent.height = height;
+            scissor.offset.x = 0;
+            scissor.offset.y = 0;
+            vkCmdSetScissor(drawCmdBuffers[i], 0, 1, &scissor);
+
+            // Bind descriptor sets describing shader binding points
+            vkCmdBindDescriptorSets(drawCmdBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &descriptorSet, 0, nullptr);
+
+            // Bind the rendering pipeline
+            // The pipeline (state object) contains all states of the rendering pipeline, binding it will set all the states specified at pipeline creation time
+            vkCmdBindPipeline(drawCmdBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
+
+            // Bind triangle vertex buffer (contains position and colors)
+            VkDeviceSize offsets[1] = { 0 };
+            vkCmdBindVertexBuffers(drawCmdBuffers[i], 0, 1, &vertices.buffer, offsets);
+
+            // Bind triangle index buffer
+            vkCmdBindIndexBuffer(drawCmdBuffers[i], indices.buffer, 0, VK_INDEX_TYPE_UINT32);
+
+            // Draw indexed triangle
+            vkCmdDrawIndexed(drawCmdBuffers[i], indices.count, 1, 0, 0, 1);
+
+            vkCmdEndRenderPass(drawCmdBuffers[i]);
+
+            // Ending the render pass will add an implicit barrier transitioning the frame buffer color attachment to 
+            // VK_IMAGE_LAYOUT_PRESENT_SRC_KHR for presenting it to the windowing system
+
+            VK_ON_FAIL_RETURN_VOID(vkEndCommandBuffer(drawCmdBuffers[i]));
+        }
+
+        u32 currentBuffer = 0;
+
+        {
+            // Get next image in the swap chain (back/front buffer)
+            VK_ON_FAIL_RETURN_VOID(vkAcquireNextImageKHR(device, swapChain, UINT64_MAX, presentCompleteSemaphore, (VkFence)nullptr, &currentBuffer));
+
+            // Use a fence to wait until the command buffer has finished execution before using it again
+            VK_ON_FAIL_RETURN_VOID(vkWaitForFences(device, 1, &waitFences[currentBuffer], VK_TRUE, UINT64_MAX));
+            VK_ON_FAIL_RETURN_VOID(vkResetFences(device, 1, &waitFences[currentBuffer]));
+
+            // Pipeline stage at which the queue submission will wait (via pWaitSemaphores)
+            VkPipelineStageFlags waitStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+            // The submit info structure specifices a command buffer queue submission batch
+            VkSubmitInfo submitInfo = {};
+            submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+            submitInfo.pWaitDstStageMask = &waitStageMask;									// Pointer to the list of pipeline stages that the semaphore waits will occur at
+            submitInfo.pWaitSemaphores = &presentCompleteSemaphore;							// Semaphore(s) to wait upon before the submitted command buffer starts executing
+            submitInfo.waitSemaphoreCount = 1;												// One wait semaphore																				
+            submitInfo.pSignalSemaphores = &renderCompleteSemaphore;						// Semaphore(s) to be signaled when command buffers have completed
+            submitInfo.signalSemaphoreCount = 1;											// One signal semaphore
+            submitInfo.commandBufferCount = 1;												// One command buffer
+            submitInfo.pCommandBuffers = &drawCmdBuffers[currentBuffer];					// Command buffers(s) to execute in this batch (submission)
+
+                                                                                            // Submit to the graphics queue passing a wait fence
+            VK_ON_FAIL_RETURN_VOID(vkQueueSubmit(queue, 1, &submitInfo, waitFences[currentBuffer]));
+
+            // Present the current buffer to the swap chain
+            // Pass the semaphore signaled by the command buffer submission from the submit info as the wait semaphore for swap chain presentation
+            // This ensures that the image is not presented to the windowing system until all commands have been submitted
+            VkPresentInfoKHR presentInfo = {};
+            presentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
+            presentInfo.pNext = NULL;
+            presentInfo.swapchainCount = 1;
+            presentInfo.pSwapchains = &swapChain;
+            presentInfo.pImageIndices = &currentBuffer;
+            // Check if a wait semaphore has been specified to wait for before presenting the image
+            if (renderCompleteSemaphore != VK_NULL_HANDLE) {
+                presentInfo.pWaitSemaphores = &renderCompleteSemaphore;
+                presentInfo.waitSemaphoreCount = 1;
+            }
+            VK_ON_FAIL_RETURN_VOID(vkQueuePresentKHR(queue, &presentInfo));
+        }
     }
 }
+
+enum input_type : u64 {
+    MOUSE = 0,
+    KEYBOARD = 1,
+    RESERVED0 = 2,
+    RESERVED1 = 3
+};
+
+struct input_mouse {
+    i16 x;
+    i16 y;
+    i16 scroll;
+    union {
+        u16 flags;
+
+        bitfield<u16, 0> btn_left_down;
+        bitfield<u16, 1> btn_left_up;
+        bitfield<u16, 2> btn_right_down;
+        bitfield<u16, 3> btn_right_up;
+        bitfield<u16, 4> btn_middle_down;
+        bitfield<u16, 5> btn_middle_up;
+
+        bitfield<u16, 0> btn_1_down;
+        bitfield<u16, 1> btn_1_up;
+        bitfield<u16, 2> btn_2_down;
+        bitfield<u16, 3> btn_2_up;
+        bitfield<u16, 4> btn_3_down;
+        bitfield<u16, 5> btn_3_up;
+        bitfield<u16, 6> btn_4_down;
+        bitfield<u16, 7> btn_4_up;
+        bitfield<u16, 8> btn_5_down;
+        bitfield<u16, 9> btn_5_up;
+
+        bitfield<u16, 10> wheel;
+        bitfield<u16, 11> hwheel;
+    };
+};
+
+struct input_keyboard {
+    u8 scancode;
+    union {
+        u8 flags;
+
+        bitfield<u8, 0> up;
+        bitfield<u8, 1> e0;
+        bitfield<u8, 2> e1;
+    };
+};
+
+struct input {
+    union {
+        bitfield<u64, 0, 1> type;
+        bitfield<u64, 2, 63> tsc;
+    };
+    union {
+        input_mouse m;
+        input_keyboard k;
+    };
+};
 
 LRESULT CALLBACK input_wndproc(HWND window, UINT message, WPARAM wparam, LPARAM lparam) {
     switch (message) {
@@ -1020,43 +1479,67 @@ LRESULT CALLBACK input_wndproc(HWND window, UINT message, WPARAM wparam, LPARAM 
 
             GetRawInputData(reinterpret_cast<HRAWINPUT>(lparam), RID_INPUT, &raw, &size, sizeof(RAWINPUTHEADER));
 
-            switch (raw.header.dwType) {
-                case RIM_TYPEKEYBOARD: {
-                    auto& kb = raw.data.keyboard;
-                    LOG_INFO(
-                        "  Kbd: make=", belog::fmt(kb.MakeCode, belog::hex{}, belog::padding{ 4, '0' }),
-                        " Flags=", belog::fmt(kb.Flags, belog::hex{}, belog::padding{ 4, '0' }),
-                        " msg=", kb.Message
-                    );
-                    if (kb.MakeCode == 0x01 && (kb.Flags & RI_KEY_BREAK)) {
-                        PostMessage(window, WM_QUIT, 0, 0);
-                    }
-                    break;
-                }
-
-                case RIM_TYPEMOUSE: {
-                    static f32 yaw = 0.0f;
-                    static f32 pitch = 0.0f;
-                    auto& m = raw.data.mouse;
-
-                    constexpr f32 sensitivityX = 0.005f;
-                    constexpr f32 sensitivityY = 0.005f;
-
-                    yaw += float(m.lLastX) * sensitivityX;
-                    pitch = ctu::clamp(pitch + float(m.lLastY) * sensitivityY, -90.0f, 90.0f);
-
-                    if (yaw > 360.0f) yaw += -360.0f;
-                    if (yaw < -360.0f) yaw += 360.0f;
-
-                    f32 yaw_rad = ctu::deg_to_rad(yaw);
-                    f32 pitch_rad = ctu::deg_to_rad(pitch);
-                    
-                    auto view = vector3{ cos(yaw_rad) * cos(pitch_rad), sin(yaw_rad) * cos(pitch_rad), sin(pitch_rad) };
-
-                    LOG_INFO(" View: (", view.x(), ", ", view.y(), ", ", view.z(), ")");
-                    break;
-                }
+            auto input_queue = (spsc_queue<input, 8>*) GetWindowLongPtr(window, 0);
+            if (input_queue == nullptr) {
+                LOG_ERR("input_queue attached to window is null, last error = ", GetLastError());
+                break;
             }
+
+            
+            input_queue->produce([&](void* storage) {
+                auto in = new(storage) input();
+                in->tsc = tsc() >> in->tsc.FIRST_BIT;
+                switch (raw.header.dwType) {
+                    case RIM_TYPEKEYBOARD:
+                    {
+                        auto& kb = raw.data.keyboard;
+                        in->type = KEYBOARD;
+                        in->k.scancode = u8(kb.MakeCode);
+                        in->k.flags = u8(kb.Flags);
+                        //LOG_INFO(
+                        //    "  Kbd: make=", belog::fmt(kb.MakeCode, belog::hex{}, belog::padding{ 4, '0' }),
+                        //    " Flags=", belog::fmt(kb.Flags, belog::hex{}, belog::padding{ 4, '0' }),
+                        //    " msg=", kb.Message
+                        //);
+                        break;
+                    }
+
+                    case RIM_TYPEMOUSE:
+                    {
+                        //static f32 yaw = 0.0f;
+                        //static f32 pitch = 0.0f;
+                        auto& m = raw.data.mouse;
+                        // ignore absolute positioning of mouse, only use relative positioning
+                        if ((m.usFlags & MOUSE_MOVE_ABSOLUTE) != 0) {
+                            return false;
+                        }
+                        in->type = MOUSE;
+                        in->m.x = i16(m.lLastX);
+                        in->m.y = i16(m.lLastY);
+                        in->m.scroll = i16(m.usButtonData);
+                        in->m.flags = u16(m.usButtonFlags);
+
+                        //constexpr f32 sensitivityX = 0.005f;
+                        //constexpr f32 sensitivityY = 0.005f;
+
+                        //yaw += float(m.lLastX) * sensitivityX;
+                        //pitch = ctu::clamp(pitch + float(m.lLastY) * sensitivityY, -90.0f, 90.0f);
+
+                        //if (yaw > 360.0f) yaw += -360.0f;
+                        //if (yaw < -360.0f) yaw += 360.0f;
+
+                        //f32 yaw_rad = ctu::deg_to_rad(yaw);
+                        //f32 pitch_rad = ctu::deg_to_rad(pitch);
+
+                        //auto view = vector3{ cos(yaw_rad) * cos(pitch_rad), sin(yaw_rad) * cos(pitch_rad), sin(pitch_rad) };
+
+                        //LOG_INFO(" View: (", view.x(), ", ", view.y(), ", ", view.z(), ")");
+                        break;
+                    }
+                }
+
+                return true;
+            });
 
             return 0;
         }
@@ -1069,7 +1552,7 @@ LRESULT CALLBACK input_wndproc(HWND window, UINT message, WPARAM wparam, LPARAM 
     return DefWindowProc(window, message, wparam, lparam);
 }
 
-int APIENTRY WinMain(HINSTANCE /*hInstance*/, HINSTANCE /*hPrevInstance*/, LPSTR /*pCmdLine*/, int /*nCmdShow*/) {
+int APIENTRY WinMain(HINSTANCE /*hInstance*/, HINSTANCE hPrevInstance, LPSTR /*pCmdLine*/, int /*nCmdShow*/) {
     AllocConsole();
     AttachConsole(GetCurrentProcessId());
     FILE* stream;
@@ -1077,11 +1560,120 @@ int APIENTRY WinMain(HINSTANCE /*hInstance*/, HINSTANCE /*hPrevInstance*/, LPSTR
     freopen_s(&stream, "CONOUT$", "w+", stderr);
     SetConsoleTitle(TEXT("RawInputTest"));
 
+    HWND window = nullptr;
+    std::atomic_bool window_created = false;
+    auto input_queue = std::make_unique<spsc_queue<input, 8>>();
+
+    static auto input_thread_func = [&window, &window_created, &input_queue]() {
+        threads::current::assign_id();
+        belog::enable_logging();
+
+        auto module_handle = GetModuleHandle(nullptr);
+        auto monitor_handle = MonitorFromPoint(POINT{ 0, 0 }, MONITOR_DEFAULTTONEAREST);
+        auto background = CreateSolidBrush(RGB(0, 0, 0));
+
+        WNDCLASSEX input_capture_class;
+        input_capture_class.cbSize = sizeof(input_capture_class);
+        input_capture_class.style = CS_HREDRAW | CS_VREDRAW;
+        input_capture_class.lpfnWndProc = input_wndproc;
+        input_capture_class.cbClsExtra = 0;
+        input_capture_class.cbWndExtra = sizeof(void*);
+        input_capture_class.hInstance = module_handle;
+        input_capture_class.hIcon = nullptr;
+        input_capture_class.hCursor = nullptr;
+        input_capture_class.hbrBackground = background;
+        input_capture_class.lpszMenuName = nullptr;
+        input_capture_class.lpszClassName = TEXT("InputCapture");
+        input_capture_class.hIconSm = nullptr;
+        auto input_capture_class_atom = RegisterClassEx(&input_capture_class);
+        ON_FAIL_TRACE_RETURN_VOID(
+            input_capture_class_atom,
+            "failed to register class ", GetLastError()
+        );
+
+        MONITORINFOEX monitor_info = { sizeof(monitor_info) };
+        ON_FAIL_TRACE_RETURN_VOID(
+            GetMonitorInfo(monitor_handle, &monitor_info),
+            "failed to query monitor info ", GetLastError()
+        );
+
+        window = CreateWindow(
+            TEXT("InputCapture"), // window class name
+            TEXT("InputCapture"), // window caption
+            WS_POPUP | WS_VISIBLE,// window style
+            monitor_info.rcMonitor.left,                                // initial x position
+            monitor_info.rcMonitor.top,                                 // initial y position
+            monitor_info.rcMonitor.right - monitor_info.rcMonitor.left, // initial x size
+            monitor_info.rcMonitor.bottom - monitor_info.rcMonitor.top, // initial y size
+            nullptr,              // parent window handle
+            nullptr,              // window menu handle
+            module_handle,        // program instance handle
+            nullptr               // creation parameters
+        );
+        ON_FAIL_TRACE_RETURN_VOID(
+            window != nullptr,
+            "failed to create window ", GetLastError()
+        );
+
+        SetLastError(0);
+        SetWindowLongPtr(window, 0, LONG_PTR(input_queue.get()));
+        ON_FAIL_RETURN_VOID(GetLastError() == 0);
+
+        RAWINPUTDEVICE devices[2];
+
+        devices[0].usUsagePage = 0x01;
+        devices[0].usUsage = 0x02;
+        devices[0].dwFlags = RIDEV_NOLEGACY;   // adds HID mouse and also ignores legacy mouse messages
+        devices[0].hwndTarget = window;
+
+        devices[1].usUsagePage = 0x01;
+        devices[1].usUsage = 0x06;
+        devices[1].dwFlags = RIDEV_NOLEGACY;   // adds HID keyboard and also ignores legacy keyboard messages
+        devices[1].hwndTarget = window;
+
+        ON_FAIL_TRACE_RETURN_VOID(
+            RegisterRawInputDevices(devices, 2, sizeof(RAWINPUTDEVICE)),
+            "failed to register for raw input ", GetLastError()
+        );
+
+        window_created.store(true, std::memory_order_release);
+
+        MSG msg;
+        BOOL bRet;
+
+        while ((bRet = GetMessage(&msg, nullptr, 0, 0)) != 0) {
+            ON_FAIL_RETURN_VOID(bRet != -1);
+
+            TranslateMessage(&msg);
+            DispatchMessage(&msg);
+        }
+
+        DestroyWindow(window);
+        UnregisterClass(TEXT("InputCapture"), module_handle);
+        DeleteObject(background);
+
+        threads::current::release_id();
+    };
+
     analyze();
     std::thread logging_thread{ belog::do_logging };
     belog::enable_logging();
-    std::thread input_thread{ input_thread_fn };
-    input_thread.join();
-    belog::shutdown();
-    logging_thread.join();
+    std::thread input_thread{ input_thread_func };
+
+    // busy wait until window has been created.
+    while (window_created.load(std::memory_order_acquire) == false) {}
+
+    //start rendering
+    main_loop(window, hPrevInstance);
+
+    // shutdown sequence
+    {
+        auto tid = GetWindowThreadProcessId(window, nullptr);
+        PostThreadMessage(tid, WM_QUIT, 0, 0);
+        input_thread.join();
+    }
+    {
+        belog::shutdown();
+        logging_thread.join();
+    }
 }
