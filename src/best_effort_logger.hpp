@@ -42,7 +42,10 @@ namespace belog {
 #endif
 
 using thread_buffer_t = spsc_ring_buffer<BELOG_BUFFER_SIZE_LOG2>;
-extern std::array<std::atomic<thread_buffer_t*>, 256> thread_buffer;
+
+namespace detail {
+thread_buffer_t* _buffer_for_thread(u32 tid);
+}
 
 template<typename... types>
 constexpr const auto line_size = ctu::size_of<typename segment<types>::container_type...>;
@@ -98,7 +101,7 @@ bool log(types&&... msgs) {
     );
 
     constexpr const auto length = line_size<types...>;
-    auto tbuf = thread_buffer[threads::current::id()].load(std::memory_order_relaxed);
+    auto tbuf = detail::_buffer_for_thread(threads::current::id());
 
     return tbuf->produce(
         sizeof(line_start_data) + length,
@@ -122,7 +125,7 @@ bool log(types&&... msgs) {
     );
 }
 
-#define BELOG_SEGMENT_FORWARD(fromType, toType)                 \
+#define BELOG_SEGMENT_FORWARD(fromType, toType) \
     template<> struct segment<fromType> : segment<toType> {}
 
 //////////////////////////////////////////////////////////////////////////
@@ -260,7 +263,7 @@ struct integer_data : segment_data {
     template<typename ty>
     void assign(ty msg) {
         attributes.is_unsigned = std::is_unsigned_v<ty> ? 1u : 0u;
-        attributes.length_log2 = static_cast<u32>(ctu::log2_v<sizeof(msg)>);
+        attributes.length_log2 = u32(ctu::log2_v<sizeof(msg)>);
         memcpy(this->msg, &msg, sizeof(msg));
     }
 };
@@ -278,13 +281,13 @@ BELOG_SEGMENT_FORWARD(integer_data, const integer_data&);
 BELOG_SEGMENT_FORWARD(integer_data&, const integer_data&);
 BELOG_SEGMENT_FORWARD(integer_data&&, const integer_data&);
 
-#define BELOG_LOG_INTEGRAL_VALUE(type)                         \
-    template<> struct segment<type> {                          \
-        bool log(type msg, void* storage) {                    \
-            new(storage) integer_data(msg);                    \
-            return true;                                       \
-        }                                                      \
-        using container_type = integer_data;                   \
+#define BELOG_LOG_INTEGRAL_VALUE(type)       \
+    template<> struct segment<type> {        \
+        bool log(type msg, void* storage) {  \
+            new(storage) integer_data(msg);  \
+            return true;                     \
+        }                                    \
+        using container_type = integer_data; \
     }
 
 BELOG_LOG_INTEGRAL_VALUE(char);
@@ -337,9 +340,28 @@ BELOG_SEGMENT_FORWARD(unsigned long long&&, unsigned long long);
 
 //////////////////////////////////////////////////////////////////////////
 
+enum float_sign_handling : u64 {
+    FLOAT_SIGN_SHOW_IF_NEGATIVE = 0,
+    FLOAT_SIGN_SHOW_ALWAYS,
+    FLOAT_SIGN_PAD_IF_POSITIVE
+};
+
+enum float_display_style : u64 {
+    FLOAT_DISPLAY_PLAIN = 0,
+    FLOAT_DISPLAY_SCIENTIFIC,
+    FLOAT_DISPLAY_HEXADECIMAL,
+    FLOAT_DISPLAY_ADAPTIVE
+};
+
 union float_attributes {
     u64 all_bits;
     bitfield<u64, 0, 3> length_log2;
+    bitfield<u64, 4, 5> sign_handling;
+    bitfield<u64, 6> is_uppercase;
+    bitfield<u64, 7, 8> display_style;
+    bitfield<u64, 9> always_show_decimal_point;
+    bitfield<u64, 10, 14> precision;
+    
 
     explicit float_attributes(u64 initval) :
         all_bits(initval) {}
@@ -354,7 +376,8 @@ struct float_data : segment_data {
     explicit float_data(ty msg) :
         segment_data(log_float),
         attributes(0) {
-        attributes.length_log2 = static_cast<u32>(ctu::log2_v<sizeof(msg)>);
+        attributes.length_log2 = u32(ctu::log2_v<sizeof(msg)>);
+        attributes.precision = attributes.precision.MASK;
         memcpy(this->msg, &msg, sizeof(msg));
     }
 };
@@ -372,13 +395,13 @@ BELOG_SEGMENT_FORWARD(float_data, const float_data&);
 BELOG_SEGMENT_FORWARD(float_data&, const float_data&);
 BELOG_SEGMENT_FORWARD(float_data&&, const float_data&);
 
-#define BELOG_LOG_FLOAT_VALUE(type)                            \
-    template<> struct segment<type> {                          \
-        bool log(type msg, void* storage) {                    \
-            new(storage) float_data(msg);                      \
-            return true;                                       \
-        }                                                      \
-        using container_type = float_data;                     \
+#define BELOG_LOG_FLOAT_VALUE(type)         \
+    template<> struct segment<type> {       \
+        bool log(type msg, void* storage) { \
+            new(storage) float_data(msg);   \
+            return true;                    \
+        }                                   \
+        using container_type = float_data;  \
     }
 
 BELOG_LOG_FLOAT_VALUE(float);
@@ -403,11 +426,25 @@ struct hex {
     void operator()(integer_attributes& attrs) {
         attrs.is_hex = true;
     }
+
+    void operator()(float_attributes& attrs) {
+        attrs.display_style = FLOAT_DISPLAY_HEXADECIMAL;
+    }
 };
 
 struct show_sign {
     void operator()(integer_attributes& attrs) {
         attrs.show_sign = true;
+    }
+
+    void operator()(float_attributes& attrs) {
+        attrs.sign_handling = FLOAT_SIGN_SHOW_ALWAYS;
+    }
+};
+
+struct pad_sign {
+    void operator()(float_attributes& attrs) {
+        attrs.sign_handling = FLOAT_SIGN_PAD_IF_POSITIVE;
     }
 };
 

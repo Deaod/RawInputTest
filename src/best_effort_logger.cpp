@@ -10,9 +10,24 @@
 
 namespace belog {
 
-std::array<std::atomic<thread_buffer_t*>, 256> thread_buffer;
+static std::array<std::atomic<thread_buffer_t*>, 256> thread_buffer;
 static constexpr u64 SHUTDOWN_SENTINEL_VALUE = ~u64(0);
 static std::atomic_bool emergency_shutdown_requested = false;
+
+namespace detail {
+
+thread_buffer_t* _buffer_for_thread(u32 tid) {
+    return thread_buffer[tid].load(std::memory_order_relaxed);
+}
+
+}
+
+static auto& DIGITS =
+    "0001020304050607080910111213141516171819"
+    "2021222324252627282930313233343536373839"
+    "4041424344454647484950515253545556575859"
+    "6061626364656667686970717273747576777879"
+    "8081828384858687888990919293949596979899";
 
 template<typename stream, typename type>
 void log_integral_value(stream& out, integer_attributes attrs, type val) {
@@ -44,13 +59,6 @@ void log_integral_value(stream& out, integer_attributes attrs, type val) {
 
         out.write(buffer, idx);
     } else {
-        static auto& DIGITS =
-            "0001020304050607080910111213141516171819"
-            "2021222324252627282930313233343536373839"
-            "4041424344454647484950515253545556575859"
-            "6061626364656667686970717273747576777879"
-            "8081828384858687888990919293949596979899";
-
         char buffer[64];
         memset(buffer, int(attrs.padding_codepoint), sizeof(buffer));
 
@@ -71,10 +79,8 @@ void log_integral_value(stream& out, integer_attributes attrs, type val) {
             *(ptr--) = DIGITS[idx];
             abs_val /= 100;
         }
-        if (abs_val < 10) {
-            *(ptr--) = char('0' + abs_val);
-        } else {
-            *(ptr--) = DIGITS[abs_val * 2 + 1];
+        *(ptr--) = DIGITS[abs_val * 2 + 1];
+        if (abs_val >= 10) {
             *(ptr--) = DIGITS[abs_val * 2];
         }
         if (val < 0) {
@@ -83,12 +89,12 @@ void log_integral_value(stream& out, integer_attributes attrs, type val) {
             *(ptr--) = '+';
         }
 
-        size_t write_len = std::max(size_t(attrs.padded_length), size_t((buffer + 32) - ptr - 1));
+        size_t write_len = std::max(size_t(attrs.padded_length), size_t((buffer + 32) - ptr));
         
         if (attrs.is_left_aligned) {
             out.write(ptr + 1, write_len);
         } else {
-            out.write(buffer + 32 - write_len, write_len);
+            out.write(buffer + 32 - write_len + 1, write_len);
         }
     }
 }
@@ -96,9 +102,37 @@ void log_integral_value(stream& out, integer_attributes attrs, type val) {
 template<typename stream, typename type>
 void log_float_value(stream& out, float_attributes attrs, type val) {
     attrs;
-    std::stringstream s;
-    s << val;
-    out << s.str();
+    size_t idx = 0;
+    char format[16];
+    format[idx++] = '%';
+
+    if (attrs.sign_handling == FLOAT_SIGN_SHOW_ALWAYS) {
+        format[idx++] = '+';
+    } else if (attrs.sign_handling == FLOAT_SIGN_PAD_IF_POSITIVE) {
+        format[idx++] = ' ';
+    }
+
+    if (attrs.always_show_decimal_point) {
+        format[idx++] = '#';
+    }
+
+    if (attrs.precision != attrs.precision.MASK) {
+        format[idx++] = '.';
+        if (attrs.precision >= 10) {
+            format[idx++] = DIGITS[attrs.precision * 2];
+        }
+        format[idx++] = DIGITS[attrs.precision * 2 + 1];
+    }
+
+    static auto& display_map = "fFeEaAgG";
+    format[idx++] = display_map[attrs.display_style * 2 + attrs.is_uppercase];
+
+    format[idx] = 0;
+    char buffer[128];
+    size_t len = snprintf(buffer, sizeof(buffer), format, val);
+    if (len > 0) {
+        out.write(buffer, len);
+    }
 }
 
 size_t log_integer(integer_data* msg) {
