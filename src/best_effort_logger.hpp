@@ -134,10 +134,14 @@ size_t log_string_literal(struct string_literal_data*);
 struct string_literal_data : segment_data {
     const char* address;
     size_t length;
+    static constexpr const size_t UNKNOWN_LENGTH = 0;
 
     template<size_t literal_length>
     explicit string_literal_data(const char(&msg)[literal_length]) :
         string_literal_data(msg, literal_length) {}
+
+    explicit string_literal_data(const char* address) :
+        string_literal_data(address, UNKNOWN_LENGTH) {}
 
     explicit string_literal_data(const char* address, size_t length) :
         segment_data(log_string_literal),
@@ -158,7 +162,7 @@ template<size_t length> struct segment<const char(&)[length]> {
 
 template<> struct segment<const char*> {
     bool log(const char* msg, void* storage) {
-        new(storage) string_literal_data(msg, std::strlen(msg) + 1);
+        new(storage) string_literal_data(msg);
         return true;
     }
 

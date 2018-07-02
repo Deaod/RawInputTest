@@ -252,7 +252,11 @@ size_t log_std_string(std_string_data* msg) {
 }
 
 size_t log_string_literal(string_literal_data* msg) {
-    std::cout.write(msg->address, msg->length - 1);
+    if (msg->length == msg->UNKNOWN_LENGTH) {
+        std::cout.write(msg->address, std::strlen(msg->address));
+    } else {
+        std::cout.write(msg->address, msg->length - 1);
+    }
     msg->~string_literal_data();
     return sizeof(string_literal_data);
 }
