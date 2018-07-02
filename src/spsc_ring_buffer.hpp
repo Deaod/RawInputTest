@@ -109,11 +109,11 @@ struct spsc_ring_buffer {
     }
 
 private:
+    char _buffer[size];
+
     std::atomic<size_t> _produce_pos = 0;
     char _padding0[align - sizeof(std::atomic<size_t>)];
 
     std::atomic<size_t> _consume_pos = 0;
     char _padding1[align - sizeof(std::atomic<size_t>)];
-
-    char _buffer[size];
 };
