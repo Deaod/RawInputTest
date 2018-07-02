@@ -47,12 +47,39 @@ public:
         return false;
     }
 
+    // returns true if buffer is empty after this call
+    template<typename cbtype>
+    bool consume_all(cbtype callback) noexcept(noexcept(callback(static_cast<_element_type*>(nullptr)))) {
+        auto consume_pos = _consume_pos.load(std::memory_order_acquire);
+        auto produce_pos = _produce_pos.load(std::memory_order_acquire);
+
+        if (produce_pos == consume_pos)
+            return true;
+
+        while (consume_pos != produce_pos) {
+            while (consume_pos != produce_pos) {
+                _element_type* elem = reinterpret_cast<_element_type*>(_buffer + (consume_pos & index_mask) * sizeof(_element_type));
+                if (callback(elem) == false) {
+                    _consume_pos.store(consume_pos, std::memory_order_release);
+                    return false;
+                }
+                elem->~_element_type();
+                consume_pos += 1;
+            }
+
+            produce_pos = _produce_pos.load(std::memory_order_acquire);
+        }
+
+        _consume_pos.store(consume_pos, std::memory_order_release);
+        return (consume_pos == produce_pos);
+    }
+
 private:
+    char _buffer[queue_size * sizeof(_element_type)];
+
     std::atomic<size_t> _produce_pos = 0;
     char _padding0[align - sizeof(std::atomic<size_t>)];
 
     std::atomic<size_t> _consume_pos = 0;
     char _padding1[align - sizeof(std::atomic<size_t>)];
-
-    char _buffer[queue_size * sizeof(_element_type)];
 };
