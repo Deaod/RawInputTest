@@ -1,9 +1,8 @@
 #pragma once
 
-#include <limits>
-#include <climits>
 #include <cstddef>
 #include <type_traits>
+#include "compile_time_utilities.hpp"
 
 #if defined(ALWAYS_INLINE)
 #define _have_macro_ALWAYS_INLINE
@@ -20,8 +19,7 @@
 #endif
 
 template<typename base_type, size_t first_bit, size_t last_bit = first_bit>
-class bitfield {
-public:
+struct bitfield {
     using value_type = std::remove_volatile_t<base_type>;
     using storage_type = base_type;
 
@@ -29,14 +27,13 @@ public:
     static_assert(std::is_const_v<base_type> == false);
     static_assert(std::is_signed_v<value_type> == false);
     static_assert(first_bit <= last_bit);
-    static_assert(last_bit < CHAR_BIT * sizeof(base_type));
+    static_assert(last_bit < ctu::bits_of<base_type>);
 
     static constexpr value_type FIRST_BIT = first_bit;
     static constexpr value_type LAST_BIT = last_bit;
     static constexpr value_type NUM_BITS = last_bit - first_bit + 1;
-    static constexpr value_type MASK = (static_cast<value_type>(1) << NUM_BITS) - 1;
+    static constexpr value_type MASK = ctu::bit_mask<value_type, NUM_BITS>;
 
-public:
     ALWAYS_INLINE constexpr bitfield() = default;
     ALWAYS_INLINE constexpr bitfield(value_type val)  {
         _assign(_raw, val);
