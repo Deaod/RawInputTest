@@ -2,12 +2,13 @@
 
 #include <climits>
 #include <cstddef>
+#include <type_traits>
 
 namespace ctu {
 
-namespace detail {
+namespace _detail {
 template<typename... types>
-constexpr size_t size_of_impl_() {
+constexpr size_t _size_of_impl() {
     size_t result = 0;
     constexpr size_t sizes[]{ sizeof(types)... };
     for (auto size : sizes) {
@@ -17,17 +18,38 @@ constexpr size_t size_of_impl_() {
 }
 
 template<>
-constexpr size_t size_of_impl_<>() {
+constexpr size_t _size_of_impl<>() {
     return 0;
 }
+
+template<typename type>
+struct _bit_mask_all {
+    static constexpr type value = type(~type(0));
+};
+
+template<typename type, int width>
+struct _bit_mask_partial {
+    static constexpr type value = type((type(1) << width) - 1);
+};
 
 } // namespace detail
 
 template<typename... types>
-constexpr const auto size_of = detail::size_of_impl_<types...>();
+constexpr const size_t size_of = _detail::_size_of_impl<types...>();
 
 template<typename... types>
-constexpr const auto bits_of = size_of<types...> * CHAR_BIT;
+constexpr const size_t bits_of = size_of<types...> * CHAR_BIT;
+
+template<typename type, int width>
+constexpr type bit_mask = std::conditional_t<
+    (width > bits_of<type>),
+    void,
+    std::conditional_t<
+        width == bits_of<type>,
+        _detail::_bit_mask_all<type>,
+        _detail::_bit_mask_partial<type, width>
+    >
+>::value;
 
 template<typename type>
 constexpr int log2(type val) {
