@@ -12,6 +12,8 @@ bool log(types&&... msgs);
 
 struct hex;
 struct padding;
+struct show_sign;
+struct pad_sign;
 
 template<typename msg_type, typename... fmt_types>
 typename segment<msg_type&&>::container_type

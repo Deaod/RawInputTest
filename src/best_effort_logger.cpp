@@ -62,27 +62,33 @@ void log_integral_value(stream& out, integer_attributes attrs, type val) {
         char buffer[64];
         memset(buffer, int(attrs.padding_codepoint), sizeof(buffer));
 
-        std::make_unsigned_t<type> abs_val;
-        if constexpr (std::is_unsigned_v<type>) {
+        using unsigned_type = std::make_unsigned_t<type>;
+
+        unsigned_type abs_val;
+        if constexpr (std::is_same_v<type, unsigned_type>) {
             abs_val = val;
         } else if (val < 0) {
-            abs_val = std::make_unsigned_t<type>(~val + 1);
+            abs_val = unsigned_type(~val + 1);
         } else {
-            abs_val = val;
+            abs_val = unsigned_type(val);
         }
 
+        // start in the middle of the buffer, in order to take padding into account
         auto ptr = buffer + 32;
 
+        // convert two digits at the same time
         while (abs_val >= 100) {
             size_t idx = (abs_val % 100) * 2;
             *(ptr--) = DIGITS[idx + 1];
             *(ptr--) = DIGITS[idx];
             abs_val /= 100;
         }
+        // take care of the last two digits
         *(ptr--) = DIGITS[abs_val * 2 + 1];
         if (abs_val >= 10) {
             *(ptr--) = DIGITS[abs_val * 2];
         }
+
         if (val < 0) {
             *(ptr--) = '-';
         } else if (attrs.show_sign) {
