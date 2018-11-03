@@ -1622,7 +1622,7 @@ void main()
                         constexpr f32 sensitivityY = 0.05f;
 
                         rotation.y += float(in->m.x) * sensitivityX;
-                        rotation.x = ctu::clamp(rotation.x + float(in->m.y) * sensitivityY, -90.0f, 90.0f);
+                        rotation.x = std::clamp(rotation.x + float(in->m.y) * sensitivityY, -90.0f, 90.0f);
 
                         if (rotation.y > 360.0f) rotation.y += -360.0f;
                         if (rotation.y < -360.0f) rotation.y += 360.0f;

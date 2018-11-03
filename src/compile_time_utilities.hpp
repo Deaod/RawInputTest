@@ -6,6 +6,15 @@
 
 namespace ctu {
 
+#if defined(_MSC_VER)
+#define PRAGMA(...) __pragma(__VA_ARGS__)
+#else
+#define PRAGMA(...) _Pragma(#__VA_ARGS__)
+#endif
+
+#define CTU_DETAIL_STRINGIFY(x) #x
+#define STRINGIFY(x) CTU_DETAIL_STRINGIFY(x)
+
 namespace _detail {
 template<typename... types>
 constexpr size_t _size_of_impl() {
@@ -22,6 +31,16 @@ constexpr size_t _size_of_impl<>() {
     return 0;
 }
 
+} // namespace detail
+
+template<typename... types>
+constexpr const size_t size_of = _detail::_size_of_impl<types...>();
+
+template<typename... types>
+constexpr const size_t bits_of = size_of<types...> * CHAR_BIT;
+
+namespace _detail {
+
 template<typename type>
 struct _bit_mask_all {
     static constexpr type value = type(~type(0));
@@ -32,23 +51,23 @@ struct _bit_mask_partial {
     static constexpr type value = type((type(1) << width) - 1);
 };
 
+template<typename type, int width>
+struct _bit_mask_error {
+    static_assert(width <= ctu::bits_of<type>);
+    static_assert(width >= 0);
+};
+
 } // namespace detail
-
-template<typename... types>
-constexpr const size_t size_of = _detail::_size_of_impl<types...>();
-
-template<typename... types>
-constexpr const size_t bits_of = size_of<types...> * CHAR_BIT;
 
 template<typename type, int width>
 constexpr type bit_mask = std::conditional_t<
-    (width > bits_of<type>),
-    void,
+    (width <= bits_of<type>) && (width >= 0),
     std::conditional_t<
         width == bits_of<type>,
         _detail::_bit_mask_all<type>,
         _detail::_bit_mask_partial<type, width>
-    >
+    >,
+    _detail::_bit_mask_error<type, width>
 >::value;
 
 template<typename type>
@@ -77,13 +96,6 @@ template<typename real>
 constexpr real deg_to_rad(real angle) {
     constexpr real pi = real(3.14159265358979323846);
     return angle * (pi / real(180.0));
-}
-
-template<typename type>
-constexpr type clamp(type val, type from, type to) {
-    if (val < from) return from;
-    if (val > to) return to;
-    return val;
 }
 
 } // namespace ctu
