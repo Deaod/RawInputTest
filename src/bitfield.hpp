@@ -32,7 +32,7 @@ struct bitfield {
     static constexpr value_type FIRST_BIT = first_bit;
     static constexpr value_type LAST_BIT = last_bit;
     static constexpr value_type NUM_BITS = last_bit - first_bit + 1;
-    static constexpr value_type MASK = ctu::bit_mask<value_type, NUM_BITS>;
+    static constexpr value_type MASK = ctu::bit_mask_v<value_type, NUM_BITS>;
 
     ALWAYS_INLINE constexpr bitfield() = default;
     ALWAYS_INLINE constexpr bitfield(value_type val)  {
@@ -271,7 +271,7 @@ private:
 };
 
 static_assert(std::is_standard_layout_v<bitfield<unsigned, 0>>);
-static_assert(std::is_pod_v<bitfield<unsigned, 0>>);
+static_assert(std::is_trivial_v<bitfield<unsigned, 0>>);
 
 #if defined(_have_macro_ALWAYS_INLINE)
 #undef _have_macro_ALWAYS_INLINE
