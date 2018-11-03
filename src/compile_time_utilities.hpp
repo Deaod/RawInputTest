@@ -41,7 +41,7 @@ template<typename... types>
 constexpr const size_t bits_of = size_of<types...> * CHAR_BIT;
 
 template<typename type, int width>
-constexpr type bit_mask = std::conditional_t<
+constexpr type bit_mask_v = std::conditional_t<
     (width > bits_of<type>),
     void,
     std::conditional_t<
@@ -50,6 +50,11 @@ constexpr type bit_mask = std::conditional_t<
         _detail::_bit_mask_partial<type, width>
     >
 >::value;
+
+template<typename type>
+constexpr type bit_mask(int width) {
+    return type((type(1) << width) - 1);
+}
 
 template<typename type>
 constexpr int log2(type val) {
@@ -69,7 +74,7 @@ constexpr int log2_v = log2(val);
 
 template<typename type>
 constexpr type round_up_bits(type val, int bits) {
-    const type mask = type((type(1) << bits) - 1);
+    const type mask = bit_mask<type>(bits);
     return (val + mask) & ~mask;
 }
 
@@ -81,9 +86,7 @@ constexpr real deg_to_rad(real angle) {
 
 template<typename type>
 constexpr type clamp(type val, type from, type to) {
-    if (val < from) return from;
-    if (val > to) return to;
-    return val;
+    return std::clamp(val, from, to);
 }
 
 } // namespace ctu

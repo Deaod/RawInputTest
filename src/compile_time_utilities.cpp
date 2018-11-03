@@ -9,13 +9,13 @@ static_assert(ctu::bits_of<char> == CHAR_BIT);
 static_assert(ctu::bits_of<int> == sizeof(int) * CHAR_BIT);
 static_assert(ctu::bits_of<int, char> == (sizeof(int) + sizeof(char)) * CHAR_BIT);
 
-static_assert(ctu::bit_mask<int, 32> == 0xFFFFFFFF);
-static_assert(ctu::bit_mask<int, 16> == 0xFFFF);
-static_assert(ctu::bit_mask<int, 8> == 0xFF);
-static_assert(ctu::bit_mask<int, 4> == 0xF);
-static_assert(ctu::bit_mask<int, 2> == 3);
-static_assert(ctu::bit_mask<int, 1> == 1);
-static_assert(ctu::bit_mask<int, 0> == 0);
+static_assert(ctu::bit_mask_v<int, 32> == 0xFFFFFFFF);
+static_assert(ctu::bit_mask_v<int, 16> == 0xFFFF);
+static_assert(ctu::bit_mask_v<int, 8> == 0xFF);
+static_assert(ctu::bit_mask_v<int, 4> == 0xF);
+static_assert(ctu::bit_mask_v<int, 2> == 3);
+static_assert(ctu::bit_mask_v<int, 1> == 1);
+static_assert(ctu::bit_mask_v<int, 0> == 0);
 
 static_assert(ctu::log2(0) == ctu::bits_of<int>);
 static_assert(ctu::log2(-1) == ctu::bits_of<int> -1);
