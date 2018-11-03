@@ -75,7 +75,7 @@ public:
     }
 
 private:
-    char _buffer[queue_size * sizeof(_element_type)];
+    std::byte _buffer[queue_size * sizeof(_element_type)];
 
     std::atomic<size_t> _produce_pos = 0;
     char _padding0[align - sizeof(std::atomic<size_t>)];

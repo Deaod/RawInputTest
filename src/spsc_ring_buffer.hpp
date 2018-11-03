@@ -7,7 +7,7 @@
 template<int _buffer_size_log2, int _align_log2 = 6>
 struct spsc_ring_buffer {
     static const auto size = size_t(1) << _buffer_size_log2;
-    static const auto mask = size - 1;
+    static const auto mask = ctu::bit_mask_v<size_t, _buffer_size_log2>;
     static const auto align = size_t(1) << _align_log2;
 
     template<typename cbtype>
@@ -109,7 +109,7 @@ struct spsc_ring_buffer {
     }
 
 private:
-    char _buffer[size];
+    std::byte _buffer[size];
 
     std::atomic<size_t> _produce_pos = 0;
     char _padding0[align - sizeof(std::atomic<size_t>)];
