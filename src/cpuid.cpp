@@ -231,6 +231,4 @@ void analyze() {
         __cpuidex(output, 4, index);
         memcpy(&inst, output, sizeof(inst));
     }
-
-    measure_tsc_frequency();
 }

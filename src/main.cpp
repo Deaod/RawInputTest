@@ -256,7 +256,12 @@ int APIENTRY WinMain(HINSTANCE hInstance, HINSTANCE /*hPrevInstance*/, LPSTR /*p
         threads::current::release_id();
     };
 
+    std::thread tsc_calibration_thread{ measure_tsc_frequency };
+
     analyze();
+
+    tsc_calibration_thread.join();
+
     std::thread logging_thread{ belog::do_logging };
     belog::enable_logging();
     std::thread input_thread{ input_thread_func };
@@ -1049,14 +1054,15 @@ int APIENTRY WinMain(HINSTANCE hInstance, HINSTANCE /*hPrevInstance*/, LPSTR /*p
         {
             // Setup vertices
             std::vector<Vertex> vertexBuffer = {
-                { { 1.0f,  1.0f, 0.0f },{ 1.0f, 0.0f, 0.0f } },
-            { { -1.0f,  1.0f, 0.0f },{ 0.0f, 1.0f, 0.0f } },
-            { { 0.0f, -1.0f, 0.0f },{ 0.0f, 0.0f, 1.0f } }
+                { {  1.0f,  1.0f, 0.0f },{ 1.0f, 0.0f, 0.0f } },
+                { { -1.0f,  1.0f, 0.0f },{ 0.0f, 1.0f, 0.0f } },
+                { {  1.0f, -1.0f, 0.0f },{ 0.0f, 0.0f, 1.0f } },
+                { { -1.0f, -1.0f, 0.0f },{ 1.0f, 0.0f, 0.0f } },
             };
             u32 vertexBufferSize = u32(vertexBuffer.size() * sizeof(Vertex));
 
             // Setup indices
-            std::vector<u32> indexBuffer = { 0, 1, 2 };
+            std::vector<u32> indexBuffer = { 0, 1, 2, 1, 2, 3 };
             indices.count = u32(indexBuffer.size());
             u32 indexBufferSize = u32(indices.count * sizeof(u32));
 
@@ -1595,6 +1601,20 @@ void main()
         bool shutdown_requested = false;
         bool KeyboardStateKeyDown[0x100];
         bool keyboard_ignore_next = false;
+        
+        glm::vec3 camera_position = glm::vec3(0.0f, 0.0f, zoom);
+        auto freq = tsc_frequency();
+        auto last_frame = tsc();
+        u8 frame_counter = 0;
+        auto last_display_tsc = last_frame;
+
+        // Map uniform buffer and update it
+        decltype(uboVS) *uniform_buffer;
+        VK_ON_FAIL_RETURN(vkMapMemory(device, uniformBufferVS.memory, 0, sizeof(uboVS), 0, (void **)&uniform_buffer), EXIT_FAILURE);
+
+        uniform_buffer->projectionMatrix = glm::perspective(glm::radians(60.0f), float(width) / float(height), 0.1f, 256.0f);
+        uniform_buffer->viewMatrix = glm::mat4(1.0f);
+        uniform_buffer->modelMatrix = glm::mat4(1.0f);
 
         while (shutdown_requested == false) {
 
@@ -1617,38 +1637,30 @@ void main()
                         break;
                     }
 
-                    case input_type::MOUSE:
+                    case input_type::MOUSE: {
                         constexpr f32 sensitivityX = 0.05f;
                         constexpr f32 sensitivityY = 0.05f;
 
                         rotation.y += float(in->m.x) * sensitivityX;
                         rotation.x = ctu::clamp(rotation.x + float(in->m.y) * sensitivityY, -90.0f, 90.0f);
 
-                        if (rotation.y > 360.0f) rotation.y += -360.0f;
-                        if (rotation.y < -360.0f) rotation.y += 360.0f;
+                        if (rotation.y > 180.0f) rotation.y += -360.0f;
+                        else if (rotation.y < -180.0f) rotation.y += 360.0f;
                         break;
+                    }
                 }
                 return true;
             });
 
             {
+                glm::mat4 model{ 1.0f };
+                model = glm::rotate(model, glm::radians(rotation.x), glm::vec3(1.0f, 0.0f, 0.0f)); // pitch
+                model = glm::rotate(model, glm::radians(rotation.y), glm::vec3(0.0f, 1.0f, 0.0f)); // yaw
+
                 // Update matrices
-                uboVS.projectionMatrix = glm::perspective(glm::radians(60.0f), (float) width / (float) height, 0.1f, 256.0f);
-
-                uboVS.viewMatrix = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.0f, zoom));
-
-                uboVS.modelMatrix = glm::mat4(1.0f);
-                uboVS.modelMatrix = glm::rotate(uboVS.modelMatrix, glm::radians(rotation.x), glm::vec3(1.0f, 0.0f, 0.0f));
-                uboVS.modelMatrix = glm::rotate(uboVS.modelMatrix, glm::radians(rotation.y), glm::vec3(0.0f, 1.0f, 0.0f));
-                uboVS.modelMatrix = glm::rotate(uboVS.modelMatrix, glm::radians(rotation.z), glm::vec3(0.0f, 0.0f, 1.0f));
-
-                // Map uniform buffer and update it
-                uint8_t *pData;
-                VK_ON_FAIL_RETURN(vkMapMemory(device, uniformBufferVS.memory, 0, sizeof(uboVS), 0, (void **) &pData), EXIT_FAILURE);
-                memcpy(pData, &uboVS, sizeof(uboVS));
-                // Unmap after data has been copied
                 // Note: Since we requested a host coherent memory type for the uniform buffer, the write is instantly visible to the GPU
-                vkUnmapMemory(device, uniformBufferVS.memory);
+                uniform_buffer->viewMatrix[3] = glm::vec4(camera_position, 1.0f);
+                uniform_buffer->modelMatrix = model;
             }
 
             {
@@ -1677,13 +1689,13 @@ void main()
                 submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
                 submitInfo.pWaitDstStageMask = &waitStageMask;									// Pointer to the list of pipeline stages that the semaphore waits will occur at
                 submitInfo.pWaitSemaphores = &presentCompleteSemaphore;							// Semaphore(s) to wait upon before the submitted command buffer starts executing
-                submitInfo.waitSemaphoreCount = 1;												// One wait semaphore																				
+                submitInfo.waitSemaphoreCount = 1;												// One wait semaphore						
                 submitInfo.pSignalSemaphores = &renderCompleteSemaphore;						// Semaphore(s) to be signaled when command buffers have completed
                 submitInfo.signalSemaphoreCount = 1;											// One signal semaphore
                 submitInfo.commandBufferCount = 1;												// One command buffer
                 submitInfo.pCommandBuffers = &drawCmdBuffers[currentBuffer];					// Command buffers(s) to execute in this batch (submission)
 
-                                                                                                // Submit to the graphics queue passing a wait fence
+                // Submit to the graphics queue passing a wait fence
                 VK_ON_FAIL_RETURN(vkQueueSubmit(queue, 1, &submitInfo, waitFences[currentBuffer]), EXIT_FAILURE);
 
                 // Present the current buffer to the swap chain
@@ -1702,7 +1714,17 @@ void main()
                 }
                 VK_ON_FAIL_RETURN(vkQueuePresentKHR(queue, &presentInfo), EXIT_FAILURE);
             }
+
+            last_frame = tsc();
+            frame_counter += 1;
+            if (frame_counter == 0) {
+                LOG_INFO("Time for 256 frames: ", double(last_frame - last_display_tsc) / double(freq));
+                last_display_tsc = last_frame;
+            }
         }
+
+        // Unmap
+        vkUnmapMemory(device, uniformBufferVS.memory);
     }
 
     // shutdown sequence
