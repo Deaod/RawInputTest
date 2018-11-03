@@ -25,7 +25,6 @@ struct bitfield {
 
     static_assert(std::is_integral_v<base_type>);
     static_assert(std::is_const_v<base_type> == false);
-    static_assert(std::is_signed_v<value_type> == false);
     static_assert(first_bit <= last_bit);
     static_assert(last_bit < ctu::bits_of<base_type>);
 
@@ -44,7 +43,11 @@ struct bitfield {
     }
 
     ALWAYS_INLINE constexpr operator value_type() const {
-        return (_raw >> first_bit) & MASK;
+        if constexpr (std::is_signed_v<value_type>) {
+            return ((_raw << (ctu::bits_of<value_type> - last_bit - 1)) >> (ctu::bits_of<value_type> - NUM_BITS));
+        } else {
+            return (_raw >> first_bit) & MASK;
+        }
     }
 
     ALWAYS_INLINE constexpr bitfield& operator=(value_type new_value) {
@@ -106,26 +109,42 @@ struct bitfield {
         value_type tmp = _raw;
         value_type val = ((tmp >> first_bit) + 1) & MASK;
         _raw = _assign(tmp, val);
+        if constexpr (std::is_signed_v<value_type>) {
+            val <<= ctu::bits_of<value_type> - NUM_BITS;
+            val >>= ctu::bits_of<value_type> - NUM_BITS;
+        }
         return val;
     }
 
     ALWAYS_INLINE constexpr value_type operator++(int) { // post-increment
         value_type tmp = _raw;
         _raw = _add(tmp, 1);
-        return (tmp >> first_bit) & MASK;
+        if constexpr (std::is_signed_v<value_type>) {
+            return ((tmp << (ctu::bits_of<value_type> - last_bit - 1)) >> (ctu::bits_of<value_type> - NUM_BITS));
+        } else {
+            return (tmp >> first_bit) & MASK;
+        }
     }
 
     ALWAYS_INLINE constexpr value_type operator--() { // pre-decrement
         value_type tmp = _raw;
         value_type val = ((tmp >> first_bit) - 1) & MASK;
         _raw = _assign(tmp, val);
+        if constexpr (std::is_signed_v<value_type>) {
+            val <<= ctu::bits_of<value_type> - NUM_BITS;
+            val >>= ctu::bits_of<value_type> - NUM_BITS;
+        }
         return val;
     }
 
     ALWAYS_INLINE constexpr value_type operator--(int) { // post-decrement
         value_type tmp = _raw;
         _raw = _sub(tmp, 1);
-        return (tmp >> first_bit) & MASK;
+        if constexpr (std::is_signed_v<value_type>) {
+            return ((tmp << (ctu::bits_of<value_type> - last_bit - 1)) >> (ctu::bits_of<value_type> - NUM_BITS));
+        } else {
+            return (tmp >> first_bit) & MASK;
+        }
     }
 
     // Now overload all those operators on volatile. Without the non-volatile
@@ -137,7 +156,11 @@ struct bitfield {
     }
 
     ALWAYS_INLINE constexpr operator value_type() const volatile {
-        return (_raw >> first_bit) & MASK;
+        if constexpr (std::is_signed_v<value_type>) {
+            return ((_raw << (ctu::bits_of<value_type> - last_bit - 1)) >> (ctu::bits_of<value_type> - NUM_BITS));
+        } else {
+            return (_raw >> first_bit) & MASK;
+        }
     }
 
     ALWAYS_INLINE constexpr volatile bitfield& operator=(value_type new_value) volatile {
@@ -199,26 +222,42 @@ struct bitfield {
         value_type tmp = _raw;
         value_type val = ((tmp >> first_bit) + 1) & MASK;
         _raw = _assign(tmp, val);
+        if constexpr (std::is_signed_v<value_type>) {
+            val <<= ctu::bits_of<value_type> - NUM_BITS;
+            val >>= ctu::bits_of<value_type> - NUM_BITS;
+        }
         return val;
     }
 
     ALWAYS_INLINE constexpr value_type operator++(int) volatile { // post-increment
         value_type tmp = _raw;
         _raw = _add(tmp, 1);
-        return (tmp >> first_bit) & MASK;
+        if constexpr (std::is_signed_v<value_type>) {
+            return ((tmp << (ctu::bits_of<value_type> - last_bit - 1)) >> (ctu::bits_of<value_type> - NUM_BITS));
+        } else {
+            return (tmp >> first_bit) & MASK;
+        }
     }
 
     ALWAYS_INLINE constexpr value_type operator--() volatile { // pre-decrement
         value_type tmp = _raw;
         value_type val = ((tmp >> first_bit) - 1) & MASK;
         _raw = _assign(tmp, val);
+        if constexpr (std::is_signed_v<value_type>) {
+            val <<= ctu::bits_of<value_type> - NUM_BITS;
+            val >>= ctu::bits_of<value_type> - NUM_BITS;
+        }
         return val;
     }
 
     ALWAYS_INLINE constexpr value_type operator--(int) volatile { // post-decrement
         value_type tmp = _raw;
         _raw = _sub(tmp, 1);
-        return (tmp >> first_bit) & MASK;
+        if constexpr (std::is_signed_v<value_type>) {
+            return ((tmp << (ctu::bits_of<value_type> - last_bit - 1)) >> (ctu::bits_of<value_type> - NUM_BITS));
+        } else {
+            return (tmp >> first_bit) & MASK;
+        }
     }
 
 private:

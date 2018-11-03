@@ -1,8 +1,6 @@
 #pragma once
 #include "best_effort_logger.hpp"
-
-#define STRINGIFY_INTERNAL(x) #x
-#define STRINGIFY(x) STRINGIFY_INTERNAL(x)
+#include "compile_time_utilities.hpp"
 
 #define LOG_ERR(...) ::belog::log("[E] (" __FILE__ ":" STRINGIFY(__LINE__) ") ", __VA_ARGS__)
 #define LOG_WARN(...) ::belog::log("[W] (" __FILE__ ":" STRINGIFY(__LINE__) ") ", __VA_ARGS__)
