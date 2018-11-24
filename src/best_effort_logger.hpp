@@ -8,7 +8,7 @@ template<typename type> struct segment;
 bool enable_logging();
 
 template<typename... types>
-bool log(types&&... msgs);
+static bool log(types&&... msgs);
 
 struct hex;
 struct padding;
@@ -16,7 +16,7 @@ struct show_sign;
 struct pad_sign;
 
 template<typename msg_type, typename... fmt_types>
-typename segment<msg_type&&>::container_type
+static typename segment<msg_type&&>::container_type
 fmt(msg_type&& msg, fmt_types&&... fmt_attrs);
 
 void do_logging();
@@ -85,7 +85,7 @@ template<typename type> struct segment {
 };
 
 template<typename msg_type, typename... fmt_types>
-typename segment<msg_type&&>::container_type
+static typename segment<msg_type&&>::container_type
 fmt(msg_type&& msg, fmt_types&&... fmt_attrs) {
     using container_type = typename segment<msg_type>::container_type;
     container_type container{ static_cast<decltype(msg)>(msg) };
@@ -96,7 +96,7 @@ fmt(msg_type&& msg, fmt_types&&... fmt_attrs) {
 }
 
 template<typename... types>
-bool log(types&&... msgs) {
+static bool log(types&&... msgs) {
     static_assert(
         (std::is_base_of_v<segment_data, typename segment<types&&>::container_type> && ...),
         "container types must be derived from struct ::belog::segment_data"
@@ -240,11 +240,23 @@ union integer_attributes {
     bitfield<u64, 4> is_uppercase;
     bitfield<u64, 5> show_sign;
     bitfield<u64, 37> is_left_aligned;
-    bitfield<u64, 38, 42> padded_length;
+    bitfield<u64, 38, 42> padded_length_;
     bitfield<u64, 43, 63> padding_codepoint;
 
     explicit integer_attributes(u64 initval) :
         all_bits(initval) {}
+
+    u64 padded_length() {
+        return padded_length_ + u64(1);
+    }
+
+    void padded_length(u64 len) {
+        padded_length_ = len - u64(1);
+    }
+
+    static constexpr u64 max_padded_length() {
+        return decltype(integer_attributes{0}.padded_length_)::MASK + 1;
+    }
 };
 
 size_t log_integer(struct integer_data*);
@@ -464,7 +476,7 @@ struct padding {
 
     void operator()(integer_attributes& attrs) {
         attrs.is_left_aligned = is_left_aligned;
-        attrs.padded_length = width;
+        attrs.padded_length(width);
         attrs.padding_codepoint = codepoint;
     }
 };

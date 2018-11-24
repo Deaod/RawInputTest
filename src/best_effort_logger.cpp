@@ -33,12 +33,12 @@ template<typename stream, typename type>
 void log_integral_value(stream& out, integer_attributes attrs, type val) {
     if (attrs.is_hex) {
         const char* base = attrs.is_uppercase ? "0123456789ABCDEF" : "0123456789abcdef";
-        char buffer[32];
+        char buffer[attrs.max_padded_length()];
         int digits = (bitmanip::find_last_set(val) / 4) + 1;
 
         size_t idx = 0;
-        if (attrs.is_left_aligned == false && attrs.padded_length > digits) {
-            while (idx < attrs.padded_length - digits) {
+        if (attrs.is_left_aligned == false && attrs.padded_length() > digits) {
+            while (idx < attrs.padded_length() - digits) {
                 buffer[idx] = char(attrs.padding_codepoint);
                 idx += 1;
             }
@@ -51,7 +51,7 @@ void log_integral_value(stream& out, integer_attributes attrs, type val) {
         } while (digits > 0);
 
         if (attrs.is_left_aligned) {
-            while (idx < attrs.padded_length) {
+            while (idx < attrs.padded_length()) {
                 buffer[idx] = char(attrs.padding_codepoint);
                 idx += 1;
             }
@@ -59,7 +59,7 @@ void log_integral_value(stream& out, integer_attributes attrs, type val) {
 
         out.write(buffer, idx);
     } else {
-        char buffer[64];
+        char buffer[2 * attrs.max_padded_length()];
         memset(buffer, int(attrs.padding_codepoint), sizeof(buffer));
 
         using unsigned_type = std::make_unsigned_t<type>;
@@ -74,7 +74,7 @@ void log_integral_value(stream& out, integer_attributes attrs, type val) {
         }
 
         // start in the middle of the buffer, in order to take padding into account
-        auto ptr = buffer + 32;
+        auto ptr = buffer + attrs.max_padded_length();
 
         // convert two digits at the same time
         while (abs_val >= 100) {
@@ -95,12 +95,12 @@ void log_integral_value(stream& out, integer_attributes attrs, type val) {
             *(ptr--) = '+';
         }
 
-        size_t write_len = std::max(size_t(attrs.padded_length), size_t((buffer + 32) - ptr));
+        size_t write_len = std::max(size_t(attrs.padded_length()), size_t((buffer + attrs.max_padded_length()) - ptr));
         
         if (attrs.is_left_aligned) {
             out.write(ptr + 1, write_len);
         } else {
-            out.write(buffer + 32 - write_len + 1, write_len);
+            out.write(buffer + attrs.max_padded_length() - write_len + 1, write_len);
         }
     }
 }
