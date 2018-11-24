@@ -240,22 +240,22 @@ union integer_attributes {
     bitfield<u64, 4> is_uppercase;
     bitfield<u64, 5> show_sign;
     bitfield<u64, 37> is_left_aligned;
-    bitfield<u64, 38, 42> padded_length_;
+    bitfield<u64, 38, 42> _padded_length;
     bitfield<u64, 43, 63> padding_codepoint;
 
     explicit integer_attributes(u64 initval) :
         all_bits(initval) {}
 
     u64 padded_length() {
-        return padded_length_ + u64(1);
+        return _padded_length + u64(1);
     }
 
     void padded_length(u64 len) {
-        padded_length_ = len - u64(1);
+        _padded_length = len - u64(1);
     }
 
     static constexpr u64 max_padded_length() {
-        return decltype(integer_attributes{0}.padded_length_)::MASK + 1;
+        return decltype(integer_attributes{0}._padded_length)::MASK + 1;
     }
 };
 
@@ -472,7 +472,7 @@ struct padding {
     u32 is_left_aligned;
 
     explicit padding(u32 width, u32 codepoint = u32(' '), u32 is_left_aligned = u32(false))
-        : width(width), codepoint(codepoint), is_left_aligned(is_left_aligned) {}
+        : width(std::max(width, u32(1))), codepoint(codepoint), is_left_aligned(is_left_aligned) {}
 
     void operator()(integer_attributes& attrs) {
         attrs.is_left_aligned = is_left_aligned;
