@@ -5,7 +5,7 @@
 #include "compile_time_utilities.hpp"
 
 template<int _buffer_size_log2, int _align_log2 = 6>
-struct spsc_ring_buffer {
+struct alignas(size_t(1) << _align_log2) spsc_ring_buffer {
     static const auto size = size_t(1) << _buffer_size_log2;
     static const auto mask = ctu::bit_mask_v<size_t, _buffer_size_log2>;
     static const auto align = size_t(1) << _align_log2;
@@ -109,11 +109,9 @@ struct spsc_ring_buffer {
     }
 
 private:
-    std::byte _buffer[size];
-
-    std::atomic<size_t> _produce_pos = 0;
-    char _padding0[align - sizeof(std::atomic<size_t>)];
-
-    std::atomic<size_t> _consume_pos = 0;
-    char _padding1[align - sizeof(std::atomic<size_t>)];
+    alignas(align) std::byte _buffer[size];
+    alignas(align) std::atomic<size_t> _produce_pos = 0;
+    alignas(align) std::atomic<size_t> _consume_pos = 0;
 };
+
+static_assert(sizeof(spsc_ring_buffer<7, 6>) == 256);
