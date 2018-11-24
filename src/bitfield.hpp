@@ -33,16 +33,15 @@ struct bitfield {
     static constexpr value_type NUM_BITS = last_bit - first_bit + 1;
     static constexpr value_type MASK = ctu::bit_mask_v<value_type, NUM_BITS>;
 
-    ALWAYS_INLINE constexpr bitfield() = default;
-    ALWAYS_INLINE constexpr bitfield(value_type val)  {
-        _assign(_raw, val);
+    ALWAYS_INLINE bitfield() = default;
+    ALWAYS_INLINE bitfield(value_type val) : _raw(_assign(_raw, val)) {
     }
 
-    ALWAYS_INLINE constexpr explicit operator bool() const {
+    ALWAYS_INLINE explicit operator bool() const {
         return (_raw & (MASK << first_bit)) != 0;
     }
 
-    ALWAYS_INLINE constexpr operator value_type() const {
+    ALWAYS_INLINE operator value_type() const {
         if constexpr (std::is_signed_v<value_type>) {
             return ((_raw << (ctu::bits_of<value_type> - last_bit - 1)) >> (ctu::bits_of<value_type> - NUM_BITS));
         } else {
@@ -50,62 +49,62 @@ struct bitfield {
         }
     }
 
-    ALWAYS_INLINE constexpr bitfield& operator=(value_type new_value) {
+    ALWAYS_INLINE bitfield& operator=(value_type new_value) {
         _raw = _assign(_raw, new_value);
         return *this;
     }
 
-    ALWAYS_INLINE constexpr bitfield& operator+=(value_type rhs) {
+    ALWAYS_INLINE bitfield& operator+=(value_type rhs) {
         _raw = _add(_raw, rhs);
         return *this;
     }
 
-    ALWAYS_INLINE constexpr bitfield& operator-=(value_type rhs) {
+    ALWAYS_INLINE bitfield& operator-=(value_type rhs) {
         _raw = _sub(_raw, rhs);
         return *this;
     }
 
-    ALWAYS_INLINE constexpr bitfield& operator*=(value_type rhs) {
+    ALWAYS_INLINE bitfield& operator*=(value_type rhs) {
         _raw = _mul(_raw, rhs);
         return *this;
     }
 
-    ALWAYS_INLINE constexpr bitfield& operator/=(value_type rhs) {
+    ALWAYS_INLINE bitfield& operator/=(value_type rhs) {
         _raw = _div(_raw, rhs);
         return *this;
     }
 
-    ALWAYS_INLINE constexpr bitfield& operator%=(value_type rhs) {
+    ALWAYS_INLINE bitfield& operator%=(value_type rhs) {
         _raw = _mod(_raw, rhs);
         return *this;
     }
 
-    ALWAYS_INLINE constexpr bitfield& operator&=(value_type rhs) {
+    ALWAYS_INLINE bitfield& operator&=(value_type rhs) {
         _raw = _and(_raw, rhs);
         return *this;
     }
 
-    ALWAYS_INLINE constexpr bitfield& operator|=(value_type rhs) {
+    ALWAYS_INLINE bitfield& operator|=(value_type rhs) {
         _raw = _or(_raw, rhs);
         return *this;
     }
 
-    ALWAYS_INLINE constexpr bitfield& operator^=(value_type rhs) {
+    ALWAYS_INLINE bitfield& operator^=(value_type rhs) {
         _raw = _xor(_raw, rhs);
         return *this;
     }
 
-    ALWAYS_INLINE constexpr bitfield& operator<<=(value_type rhs) {
+    ALWAYS_INLINE bitfield& operator<<=(value_type rhs) {
         _raw = _shl(_raw, rhs);
         return *this;
     }
 
-    ALWAYS_INLINE constexpr bitfield& operator>>=(value_type rhs) {
+    ALWAYS_INLINE bitfield& operator>>=(value_type rhs) {
         _raw = _shr(_raw, rhs);
         return *this;
     }
 
-    ALWAYS_INLINE constexpr value_type operator++() { // pre-increment
+    ALWAYS_INLINE value_type operator++() { // pre-increment
         value_type tmp = _raw;
         value_type val = ((tmp >> first_bit) + 1) & MASK;
         _raw = _assign(tmp, val);
@@ -116,7 +115,7 @@ struct bitfield {
         return val;
     }
 
-    ALWAYS_INLINE constexpr value_type operator++(int) { // post-increment
+    ALWAYS_INLINE value_type operator++(int) { // post-increment
         value_type tmp = _raw;
         _raw = _add(tmp, 1);
         if constexpr (std::is_signed_v<value_type>) {
@@ -126,7 +125,7 @@ struct bitfield {
         }
     }
 
-    ALWAYS_INLINE constexpr value_type operator--() { // pre-decrement
+    ALWAYS_INLINE value_type operator--() { // pre-decrement
         value_type tmp = _raw;
         value_type val = ((tmp >> first_bit) - 1) & MASK;
         _raw = _assign(tmp, val);
@@ -137,7 +136,7 @@ struct bitfield {
         return val;
     }
 
-    ALWAYS_INLINE constexpr value_type operator--(int) { // post-decrement
+    ALWAYS_INLINE value_type operator--(int) { // post-decrement
         value_type tmp = _raw;
         _raw = _sub(tmp, 1);
         if constexpr (std::is_signed_v<value_type>) {
@@ -151,11 +150,11 @@ struct bitfield {
     // versions compilers cannot delete calls to these operators, even if the
     // instance is not volatile.
 
-    ALWAYS_INLINE constexpr explicit operator bool() const volatile {
+    ALWAYS_INLINE explicit operator bool() const volatile {
         return (_raw & (MASK << first_bit)) != 0;
     }
 
-    ALWAYS_INLINE constexpr operator value_type() const volatile {
+    ALWAYS_INLINE operator value_type() const volatile {
         if constexpr (std::is_signed_v<value_type>) {
             return ((_raw << (ctu::bits_of<value_type> - last_bit - 1)) >> (ctu::bits_of<value_type> - NUM_BITS));
         } else {
@@ -163,62 +162,62 @@ struct bitfield {
         }
     }
 
-    ALWAYS_INLINE constexpr volatile bitfield& operator=(value_type new_value) volatile {
+    ALWAYS_INLINE volatile bitfield& operator=(value_type new_value) volatile {
         _raw = _assign(_raw, new_value);
         return *this;
     }
 
-    ALWAYS_INLINE constexpr volatile bitfield& operator+=(value_type rhs) volatile {
+    ALWAYS_INLINE volatile bitfield& operator+=(value_type rhs) volatile {
         _raw = _add(_raw, rhs);
         return *this;
     }
 
-    ALWAYS_INLINE constexpr volatile bitfield& operator-=(value_type rhs) volatile {
+    ALWAYS_INLINE volatile bitfield& operator-=(value_type rhs) volatile {
         _raw = _sub(_raw, rhs);
         return *this;
     }
 
-    ALWAYS_INLINE constexpr volatile bitfield& operator*=(value_type rhs) volatile {
+    ALWAYS_INLINE volatile bitfield& operator*=(value_type rhs) volatile {
         _raw = _mul(_raw, rhs);
         return *this;
     }
 
-    ALWAYS_INLINE constexpr volatile bitfield& operator/=(value_type rhs) volatile {
+    ALWAYS_INLINE volatile bitfield& operator/=(value_type rhs) volatile {
         _raw = _div(_raw, rhs);
         return *this;
     }
 
-    ALWAYS_INLINE constexpr volatile bitfield& operator%=(value_type rhs) volatile {
+    ALWAYS_INLINE volatile bitfield& operator%=(value_type rhs) volatile {
         _raw = _mod(_raw, rhs);
         return *this;
     }
 
-    ALWAYS_INLINE constexpr volatile bitfield& operator&=(value_type rhs) volatile {
+    ALWAYS_INLINE volatile bitfield& operator&=(value_type rhs) volatile {
         _raw = _and(_raw, rhs);
         return *this;
     }
 
-    ALWAYS_INLINE constexpr volatile bitfield& operator|=(value_type rhs) volatile {
+    ALWAYS_INLINE volatile bitfield& operator|=(value_type rhs) volatile {
         _raw = _or(_raw, rhs);
         return *this;
     }
 
-    ALWAYS_INLINE constexpr volatile bitfield& operator^=(value_type rhs) volatile {
+    ALWAYS_INLINE volatile bitfield& operator^=(value_type rhs) volatile {
         _raw = _xor(_raw, rhs);
         return *this;
     }
 
-    ALWAYS_INLINE constexpr volatile bitfield& operator<<=(value_type rhs) volatile {
+    ALWAYS_INLINE volatile bitfield& operator<<=(value_type rhs) volatile {
         _raw = _shl(_raw, rhs);
         return *this;
     }
 
-    ALWAYS_INLINE constexpr volatile bitfield& operator>>=(value_type rhs) volatile {
+    ALWAYS_INLINE volatile bitfield& operator>>=(value_type rhs) volatile {
         _raw = _shr(_raw, rhs);
         return *this;
     }
 
-    ALWAYS_INLINE constexpr value_type operator++() volatile { // pre-increment
+    ALWAYS_INLINE value_type operator++() volatile { // pre-increment
         value_type tmp = _raw;
         value_type val = ((tmp >> first_bit) + 1) & MASK;
         _raw = _assign(tmp, val);
@@ -229,7 +228,7 @@ struct bitfield {
         return val;
     }
 
-    ALWAYS_INLINE constexpr value_type operator++(int) volatile { // post-increment
+    ALWAYS_INLINE value_type operator++(int) volatile { // post-increment
         value_type tmp = _raw;
         _raw = _add(tmp, 1);
         if constexpr (std::is_signed_v<value_type>) {
@@ -239,7 +238,7 @@ struct bitfield {
         }
     }
 
-    ALWAYS_INLINE constexpr value_type operator--() volatile { // pre-decrement
+    ALWAYS_INLINE value_type operator--() volatile { // pre-decrement
         value_type tmp = _raw;
         value_type val = ((tmp >> first_bit) - 1) & MASK;
         _raw = _assign(tmp, val);
@@ -250,7 +249,7 @@ struct bitfield {
         return val;
     }
 
-    ALWAYS_INLINE constexpr value_type operator--(int) volatile { // post-decrement
+    ALWAYS_INLINE value_type operator--(int) volatile { // post-decrement
         value_type tmp = _raw;
         _raw = _sub(tmp, 1);
         if constexpr (std::is_signed_v<value_type>) {
@@ -261,47 +260,47 @@ struct bitfield {
     }
 
 private:
-    ALWAYS_INLINE static constexpr value_type _assign(value_type lhs, value_type rhs) {
+    ALWAYS_INLINE static value_type _assign(value_type lhs, value_type rhs) {
         return (lhs & ~(MASK << first_bit)) | ((rhs & MASK) << first_bit);
     }
 
-    ALWAYS_INLINE static constexpr value_type _add(value_type lhs, value_type rhs) {
+    ALWAYS_INLINE static value_type _add(value_type lhs, value_type rhs) {
         return (lhs & ~(MASK << first_bit)) | ((lhs + (rhs << first_bit)) & (MASK << first_bit));
     }
 
-    ALWAYS_INLINE static constexpr value_type _sub(value_type lhs, value_type rhs) {
+    ALWAYS_INLINE static value_type _sub(value_type lhs, value_type rhs) {
         return (lhs & ~(MASK << first_bit)) | ((lhs - (rhs << first_bit)) & (MASK << first_bit));
     }
 
-    ALWAYS_INLINE static constexpr value_type _mul(value_type lhs, value_type rhs) {
+    ALWAYS_INLINE static value_type _mul(value_type lhs, value_type rhs) {
         return (lhs & ~(MASK << first_bit)) | (((lhs & (MASK << first_bit)) * rhs) & (MASK << first_bit));
     }
 
-    ALWAYS_INLINE static constexpr value_type _div(value_type lhs, value_type rhs) {
+    ALWAYS_INLINE static value_type _div(value_type lhs, value_type rhs) {
         return (lhs & ~(MASK << first_bit)) | (((lhs & (MASK << first_bit)) / rhs) & (MASK << first_bit));
     }
 
-    ALWAYS_INLINE static constexpr value_type _mod(value_type lhs, value_type rhs) {
+    ALWAYS_INLINE static value_type _mod(value_type lhs, value_type rhs) {
         return (lhs & ~(MASK << first_bit)) | (lhs % ((rhs & MASK) << first_bit));
     }
 
-    ALWAYS_INLINE static constexpr value_type _and(value_type lhs, value_type rhs) {
+    ALWAYS_INLINE static value_type _and(value_type lhs, value_type rhs) {
         return lhs & (~(MASK << first_bit) | (rhs << first_bit));
     }
 
-    ALWAYS_INLINE static constexpr value_type _or(value_type lhs, value_type rhs) {
+    ALWAYS_INLINE static value_type _or(value_type lhs, value_type rhs) {
         return lhs | ((rhs & MASK) << first_bit);
     }
 
-    ALWAYS_INLINE static constexpr value_type _xor(value_type lhs, value_type rhs) {
+    ALWAYS_INLINE static value_type _xor(value_type lhs, value_type rhs) {
         return lhs ^ ((rhs & MASK) << first_bit);
     }
 
-    ALWAYS_INLINE static constexpr value_type _shl(value_type lhs, value_type rhs) {
+    ALWAYS_INLINE static value_type _shl(value_type lhs, value_type rhs) {
         return (lhs & ~(MASK << first_bit)) | (((lhs & (MASK << first_bit)) << rhs) & (MASK << first_bit));
     }
 
-    ALWAYS_INLINE static constexpr value_type _shr(value_type lhs, value_type rhs) {
+    ALWAYS_INLINE static value_type _shr(value_type lhs, value_type rhs) {
         return (lhs & ~(MASK << first_bit)) | (((lhs & (MASK << first_bit)) >> rhs) & (MASK << first_bit));
     }
 
