@@ -55,6 +55,7 @@ endif()
 
 if (MSVC)
     set(CMAKE_CXX_FLAGS         "/W4 /EHsc /GR- /permissive- /std:c++latest /fp:fast /Zi /MP /Zc:rvalueCast /arch:AVX2")
+    set(CMAKE_CXX_FLAGS         "${CMAKE_CXX_FLAGS} /wd4324")
     set(CMAKE_CXX_FLAGS_RELEASE "/MT  /O2 /Ob2 /Oi /Ot /Oy /GL /FA /Gy")
     set(CMAKE_CXX_FLAGS_DEBUG   "/MTd /Od /Ob0")
 
