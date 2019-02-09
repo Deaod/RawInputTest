@@ -85,9 +85,14 @@ struct alignas(size_t(1) << _align_log2) spsc_ring_buffer {
                     memcpy(&length, _buffer + (consume_pos & mask), sizeof(length));
                 }
 
-                if (callback(static_cast<void*>(_buffer + (consume_pos & mask) + sizeof(ptrdiff_t)), length) == false) {
+                try {
+                    if (callback(static_cast<void*>(_buffer + (consume_pos & mask) + sizeof(ptrdiff_t)), length) == false) {
+                        _consume_pos.store(consume_pos, std::memory_order_release);
+                        return false;
+                    }
+                } catch (...) {
                     _consume_pos.store(consume_pos, std::memory_order_release);
-                    return false;
+                    throw;
                 }
 
                 auto rounded_length = ctu::round_up_bits(length, ctu::log2_v<sizeof(ptrdiff_t)>);

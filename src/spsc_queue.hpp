@@ -59,10 +59,17 @@ public:
         while (consume_pos != produce_pos) {
             while (consume_pos != produce_pos) {
                 _element_type* elem = reinterpret_cast<_element_type*>(_buffer + (consume_pos & index_mask) * sizeof(_element_type));
-                if (callback(elem) == false) {
+
+                try {
+                    if (callback(elem) == false) {
+                        _consume_pos.store(consume_pos, std::memory_order_release);
+                        return false;
+                    }
+                } catch (...) {
                     _consume_pos.store(consume_pos, std::memory_order_release);
-                    return false;
+                    throw;
                 }
+
                 elem->~_element_type();
                 consume_pos += 1;
             }
