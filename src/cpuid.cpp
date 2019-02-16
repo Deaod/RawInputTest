@@ -1,21 +1,85 @@
 #include "cpuid.hpp"
 #include "bitfield.hpp"
-#include <intrin.h>
 #include <iostream>
 #include <thread>
 
+#if defined(_MSC_VER)
+#include <Windows.h>
+#include <powerbase.h>
+#include <intrin.h>
+#elif defined(__GNUC__)
+#include <x86intrin.h>
+#include <cpuid.h>
+#endif
+
+static void cpuid(int(&output)[4], int leaf) {
+#if defined(_MSC_VER)
+    __cpuid(output, leaf);
+#elif defined(__GNUC__)
+    __get_cpuid(leaf, output + 0, output + 1, output + 2, output + 3);
+#else
+#error "unsupported compiler (find out how to invoke CPUID for this one)"
+#endif
+}
+
+static void cpuidex(int(&output)[4], int leaf, int subleaf) {
+#if defined(_MSC_VER)
+    __cpuidex(output, leaf, subleaf);
+#elif defined(__GNUC__)
+    __get_cpuid_count(leaf, subleaf, output + 0, output + 1, output + 2, output + 3);
+#else
+#error "unsupported compiler (find out how to invoke CPUID with subleaf for this one)"
+#endif
+}
+
 static u64 tsc_frequency_;
 void measure_tsc_frequency() {
-    unsigned cpu;
-    auto start = __rdtscp(&cpu);
-    std::this_thread::sleep_for(std::chrono::seconds{ 1 });
-    auto end = __rdtscp(&cpu);
+    int output[4];
+    cpuid(output, 0);
+    auto max_function = output[0];
+    if (max_function >= 0x16) {
+        struct cpuid_frequency_info {
+            u32 base_frequency;
+            u32 maximum_frequency;
+            u32 bus_frequency;
+            u32 _unused;
+        };
 
-    auto clockrate = end - start;
+        cpuid_frequency_info info;
+        cpuid(output, 0x16);
+        memcpy(&info, output, sizeof(info));
 
-    constexpr auto clock_accuracy = u64(4'000'000);
+        tsc_frequency_ = info.base_frequency * 1'000'000;
+    } else {
+#if defined(_MSC_VER)
+        typedef struct _PROCESSOR_POWER_INFORMATION {
+            ULONG Number;
+            ULONG MaxMhz;
+            ULONG CurrentMhz;
+            ULONG MhzLimit;
+            ULONG MaxIdleState;
+            ULONG CurrentIdleState;
+        } PROCESSOR_POWER_INFORMATION, *PPROCESSOR_POWER_INFORMATION;
 
-    tsc_frequency_ = ((clockrate + clock_accuracy / 2) / clock_accuracy) * clock_accuracy;
+        SYSTEM_INFO info;
+        GetSystemInfo(&info);
+        std::vector<PROCESSOR_POWER_INFORMATION> core_info(info.dwNumberOfProcessors);
+        CallNtPowerInformation(ProcessorInformation, nullptr, 0, core_info.data(), info.dwNumberOfProcessors * sizeof(PROCESSOR_POWER_INFORMATION));
+
+        tsc_frequency_ = core_info[0].MaxMhz * 1'000'000;
+#else
+        unsigned cpu;
+        auto start = __rdtscp(&cpu);
+        std::this_thread::sleep_for(std::chrono::seconds{ 1 });
+        auto end = __rdtscp(&cpu);
+
+        auto clockrate = end - start;
+
+        constexpr auto clock_accuracy = u64(4'000'000);
+
+        tsc_frequency_ = ((clockrate + clock_accuracy / 2) / clock_accuracy) * clock_accuracy;
+#endif
+    }
 }
 
 u64 tsc_frequency() {
@@ -205,11 +269,11 @@ struct cache_description {
 
 void analyze() {
     int output[4];
-    __cpuid(output, 0);
+    cpuid(output, 0);
     auto max_function = output[0];
     std::cout << "Max Function: " << max_function << lf;
 
-    __cpuid(output, 1);
+    cpuid(output, 1);
 
     cpuid_leaf1 leaf1;
     memcpy(&leaf1, output, sizeof(leaf1));
@@ -219,7 +283,7 @@ void analyze() {
     std::cout << "Stepping: " << leaf1.processor_signature.stepping() << lf;
 
     int index = 0;
-    __cpuidex(output, 4, index);
+    cpuidex(output, 4, index);
     cache_description inst;
     memcpy(&inst, output, sizeof(inst));
     while (inst.type() != cache_description::null) {
@@ -228,7 +292,7 @@ void analyze() {
             << "  Line Size: " << inst.line_size() << lf;
 
         index += 1;
-        __cpuidex(output, 4, index);
+        cpuidex(output, 4, index);
         memcpy(&inst, output, sizeof(inst));
     }
 }

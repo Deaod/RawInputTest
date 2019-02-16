@@ -18,34 +18,34 @@
 #define ALWAYS_INLINE
 #endif
 
-template<typename base_type, size_t first_bit, size_t last_bit = first_bit>
+template<typename _base_type, size_t _first_bit, size_t _last_bit = _first_bit>
 struct bitfield {
-    using value_type = std::remove_volatile_t<base_type>;
-    using storage_type = base_type;
+    using value_type = std::remove_volatile_t<_base_type>;
+    using storage_type = _base_type;
 
-    static_assert(std::is_integral_v<base_type>);
-    static_assert(std::is_const_v<base_type> == false);
-    static_assert(first_bit <= last_bit);
-    static_assert(last_bit < ctu::bits_of<base_type>);
+    static_assert(std::is_integral_v<_base_type>);
+    static_assert(std::is_const_v<_base_type> == false);
+    static_assert(_first_bit <= _last_bit);
+    static_assert(_last_bit < ctu::bits_of<_base_type>);
 
-    static constexpr value_type FIRST_BIT = first_bit;
-    static constexpr value_type LAST_BIT = last_bit;
-    static constexpr value_type NUM_BITS = last_bit - first_bit + 1;
-    static constexpr value_type MASK = ctu::bit_mask_v<value_type, NUM_BITS>;
+    static constexpr value_type first_bit = _first_bit;
+    static constexpr value_type last_bit = _last_bit;
+    static constexpr value_type num_bits = _last_bit - _first_bit + 1;
+    static constexpr value_type mask = ctu::bit_mask_v<value_type, num_bits>;
 
     ALWAYS_INLINE bitfield() = default;
     ALWAYS_INLINE bitfield(value_type val) : _raw(_assign(_raw, val)) {
     }
 
     ALWAYS_INLINE explicit operator bool() const {
-        return (_raw & (MASK << first_bit)) != 0;
+        return (_raw & (mask << first_bit)) != 0;
     }
 
     ALWAYS_INLINE operator value_type() const {
         if constexpr (std::is_signed_v<value_type>) {
-            return ((_raw << (ctu::bits_of<value_type> - last_bit - 1)) >> (ctu::bits_of<value_type> - NUM_BITS));
+            return ((_raw << (ctu::bits_of<value_type> - last_bit - 1)) >> (ctu::bits_of<value_type> - num_bits));
         } else {
-            return (_raw >> first_bit) & MASK;
+            return (_raw >> first_bit) & mask;
         }
     }
 
@@ -106,11 +106,11 @@ struct bitfield {
 
     ALWAYS_INLINE value_type operator++() { // pre-increment
         value_type tmp = _raw;
-        value_type val = ((tmp >> first_bit) + 1) & MASK;
+        value_type val = ((tmp >> first_bit) + 1) & mask;
         _raw = _assign(tmp, val);
         if constexpr (std::is_signed_v<value_type>) {
-            val <<= ctu::bits_of<value_type> - NUM_BITS;
-            val >>= ctu::bits_of<value_type> - NUM_BITS;
+            val <<= ctu::bits_of<value_type> - num_bits;
+            val >>= ctu::bits_of<value_type> - num_bits;
         }
         return val;
     }
@@ -119,19 +119,19 @@ struct bitfield {
         value_type tmp = _raw;
         _raw = _add(tmp, 1);
         if constexpr (std::is_signed_v<value_type>) {
-            return ((tmp << (ctu::bits_of<value_type> - last_bit - 1)) >> (ctu::bits_of<value_type> - NUM_BITS));
+            return ((tmp << (ctu::bits_of<value_type> - last_bit - 1)) >> (ctu::bits_of<value_type> - num_bits));
         } else {
-            return (tmp >> first_bit) & MASK;
+            return (tmp >> first_bit) & mask;
         }
     }
 
     ALWAYS_INLINE value_type operator--() { // pre-decrement
         value_type tmp = _raw;
-        value_type val = ((tmp >> first_bit) - 1) & MASK;
+        value_type val = ((tmp >> first_bit) - 1) & mask;
         _raw = _assign(tmp, val);
         if constexpr (std::is_signed_v<value_type>) {
-            val <<= ctu::bits_of<value_type> - NUM_BITS;
-            val >>= ctu::bits_of<value_type> - NUM_BITS;
+            val <<= ctu::bits_of<value_type> - num_bits;
+            val >>= ctu::bits_of<value_type> - num_bits;
         }
         return val;
     }
@@ -140,9 +140,9 @@ struct bitfield {
         value_type tmp = _raw;
         _raw = _sub(tmp, 1);
         if constexpr (std::is_signed_v<value_type>) {
-            return ((tmp << (ctu::bits_of<value_type> - last_bit - 1)) >> (ctu::bits_of<value_type> - NUM_BITS));
+            return ((tmp << (ctu::bits_of<value_type> - last_bit - 1)) >> (ctu::bits_of<value_type> - num_bits));
         } else {
-            return (tmp >> first_bit) & MASK;
+            return (tmp >> first_bit) & mask;
         }
     }
 
@@ -151,14 +151,14 @@ struct bitfield {
     // instance is not volatile.
 
     ALWAYS_INLINE explicit operator bool() const volatile {
-        return (_raw & (MASK << first_bit)) != 0;
+        return (_raw & (mask << first_bit)) != 0;
     }
 
     ALWAYS_INLINE operator value_type() const volatile {
         if constexpr (std::is_signed_v<value_type>) {
-            return ((_raw << (ctu::bits_of<value_type> - last_bit - 1)) >> (ctu::bits_of<value_type> - NUM_BITS));
+            return ((_raw << (ctu::bits_of<value_type> - last_bit - 1)) >> (ctu::bits_of<value_type> - num_bits));
         } else {
-            return (_raw >> first_bit) & MASK;
+            return (_raw >> first_bit) & mask;
         }
     }
 
@@ -219,11 +219,11 @@ struct bitfield {
 
     ALWAYS_INLINE value_type operator++() volatile { // pre-increment
         value_type tmp = _raw;
-        value_type val = ((tmp >> first_bit) + 1) & MASK;
+        value_type val = ((tmp >> first_bit) + 1) & mask;
         _raw = _assign(tmp, val);
         if constexpr (std::is_signed_v<value_type>) {
-            val <<= ctu::bits_of<value_type> - NUM_BITS;
-            val >>= ctu::bits_of<value_type> - NUM_BITS;
+            val <<= ctu::bits_of<value_type> - num_bits;
+            val >>= ctu::bits_of<value_type> - num_bits;
         }
         return val;
     }
@@ -232,19 +232,19 @@ struct bitfield {
         value_type tmp = _raw;
         _raw = _add(tmp, 1);
         if constexpr (std::is_signed_v<value_type>) {
-            return ((tmp << (ctu::bits_of<value_type> - last_bit - 1)) >> (ctu::bits_of<value_type> - NUM_BITS));
+            return ((tmp << (ctu::bits_of<value_type> - last_bit - 1)) >> (ctu::bits_of<value_type> - num_bits));
         } else {
-            return (tmp >> first_bit) & MASK;
+            return (tmp >> first_bit) & mask;
         }
     }
 
     ALWAYS_INLINE value_type operator--() volatile { // pre-decrement
         value_type tmp = _raw;
-        value_type val = ((tmp >> first_bit) - 1) & MASK;
+        value_type val = ((tmp >> first_bit) - 1) & mask;
         _raw = _assign(tmp, val);
         if constexpr (std::is_signed_v<value_type>) {
-            val <<= ctu::bits_of<value_type> - NUM_BITS;
-            val >>= ctu::bits_of<value_type> - NUM_BITS;
+            val <<= ctu::bits_of<value_type> - num_bits;
+            val >>= ctu::bits_of<value_type> - num_bits;
         }
         return val;
     }
@@ -253,59 +253,59 @@ struct bitfield {
         value_type tmp = _raw;
         _raw = _sub(tmp, 1);
         if constexpr (std::is_signed_v<value_type>) {
-            return ((tmp << (ctu::bits_of<value_type> - last_bit - 1)) >> (ctu::bits_of<value_type> - NUM_BITS));
+            return ((tmp << (ctu::bits_of<value_type> - last_bit - 1)) >> (ctu::bits_of<value_type> - num_bits));
         } else {
-            return (tmp >> first_bit) & MASK;
+            return (tmp >> first_bit) & mask;
         }
     }
 
 private:
     ALWAYS_INLINE static value_type _assign(value_type lhs, value_type rhs) {
-        return (lhs & ~(MASK << first_bit)) | ((rhs & MASK) << first_bit);
+        return (lhs & ~(mask << first_bit)) | ((rhs & mask) << first_bit);
     }
 
     ALWAYS_INLINE static value_type _add(value_type lhs, value_type rhs) {
-        return (lhs & ~(MASK << first_bit)) | ((lhs + (rhs << first_bit)) & (MASK << first_bit));
+        return (lhs & ~(mask << first_bit)) | ((lhs + (rhs << first_bit)) & (mask << first_bit));
     }
 
     ALWAYS_INLINE static value_type _sub(value_type lhs, value_type rhs) {
-        return (lhs & ~(MASK << first_bit)) | ((lhs - (rhs << first_bit)) & (MASK << first_bit));
+        return (lhs & ~(mask << first_bit)) | ((lhs - (rhs << first_bit)) & (mask << first_bit));
     }
 
     ALWAYS_INLINE static value_type _mul(value_type lhs, value_type rhs) {
-        return (lhs & ~(MASK << first_bit)) | (((lhs & (MASK << first_bit)) * rhs) & (MASK << first_bit));
+        return (lhs & ~(mask << first_bit)) | (((lhs & (mask << first_bit)) * rhs) & (mask << first_bit));
     }
 
     ALWAYS_INLINE static value_type _div(value_type lhs, value_type rhs) {
-        return (lhs & ~(MASK << first_bit)) | (((lhs & (MASK << first_bit)) / rhs) & (MASK << first_bit));
+        return (lhs & ~(mask << first_bit)) | (((lhs & (mask << first_bit)) / rhs) & (mask << first_bit));
     }
 
     ALWAYS_INLINE static value_type _mod(value_type lhs, value_type rhs) {
-        return (lhs & ~(MASK << first_bit)) | (lhs % ((rhs & MASK) << first_bit));
+        return (lhs & ~(mask << first_bit)) | (lhs % ((rhs & mask) << first_bit));
     }
 
     ALWAYS_INLINE static value_type _and(value_type lhs, value_type rhs) {
-        return lhs & (~(MASK << first_bit) | (rhs << first_bit));
+        return lhs & (~(mask << first_bit) | (rhs << first_bit));
     }
 
     ALWAYS_INLINE static value_type _or(value_type lhs, value_type rhs) {
-        return lhs | ((rhs & MASK) << first_bit);
+        return lhs | ((rhs & mask) << first_bit);
     }
 
     ALWAYS_INLINE static value_type _xor(value_type lhs, value_type rhs) {
-        return lhs ^ ((rhs & MASK) << first_bit);
+        return lhs ^ ((rhs & mask) << first_bit);
     }
 
     ALWAYS_INLINE static value_type _shl(value_type lhs, value_type rhs) {
-        return (lhs & ~(MASK << first_bit)) | (((lhs & (MASK << first_bit)) << rhs) & (MASK << first_bit));
+        return (lhs & ~(mask << first_bit)) | (((lhs & (mask << first_bit)) << rhs) & (mask << first_bit));
     }
 
     ALWAYS_INLINE static value_type _shr(value_type lhs, value_type rhs) {
-        return (lhs & ~(MASK << first_bit)) | (((lhs & (MASK << first_bit)) >> rhs) & (MASK << first_bit));
+        return (lhs & ~(mask << first_bit)) | (((lhs & (mask << first_bit)) >> rhs) & (mask << first_bit));
     }
 
 private:
-    base_type _raw;
+    _base_type _raw;
 };
 
 static_assert(std::is_standard_layout_v<bitfield<unsigned, 0>>);

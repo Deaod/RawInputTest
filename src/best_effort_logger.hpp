@@ -255,7 +255,7 @@ union integer_attributes {
     }
 
     static constexpr u64 max_padded_length() {
-        return decltype(integer_attributes{0}._padded_length)::MASK + 1;
+        return decltype(integer_attributes{0}._padded_length)::mask + 1;
     }
 };
 
@@ -395,7 +395,7 @@ struct float_data : segment_data {
         segment_data(log_float),
         attributes(0) {
         attributes.length_log2 = u32(ctu::log2_v<sizeof(msg)>);
-        attributes.precision = attributes.precision.MASK;
+        attributes.precision = attributes.precision.mask;
         memcpy(this->msg, &msg, sizeof(msg));
     }
 };

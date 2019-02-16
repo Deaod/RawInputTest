@@ -122,7 +122,7 @@ void log_float_value(stream& out, float_attributes attrs, type val) {
         format[idx++] = '#';
     }
 
-    if (attrs.precision != attrs.precision.MASK) {
+    if (attrs.precision != attrs.precision.mask) {
         format[idx++] = '.';
         if (attrs.precision >= 10) {
             format[idx++] = DIGITS[attrs.precision * 2];

@@ -51,6 +51,7 @@ target_link_libraries(RawInputTest Vulkan::Vulkan glm)
 
 if (WIN32)
     target_compile_definitions(RawInputTest PRIVATE VK_USE_PLATFORM_WIN32_KHR)
+    target_link_libraries(RawInputTest PowrProf.lib)
 endif()
 
 if (MSVC)
