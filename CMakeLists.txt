@@ -12,6 +12,7 @@ set(headers
     src/compile_time_utilities.hpp
     src/cpuid.hpp
     src/log_utils.hpp
+    src/scope_guard.hpp
     src/simd_primitives.hpp
     src/spsc_queue.hpp
     src/spsc_ring_buffer.hpp
