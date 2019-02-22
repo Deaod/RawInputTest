@@ -141,7 +141,7 @@ void log_float_value(stream& out, float_attributes attrs, type val) {
     }
 }
 
-size_t log_integer(integer_data* msg) {
+size_t log_integer(const integer_data* msg) {
     switch (msg->attributes.length_log2) {
 #if CHAR_MAX < SHRT_MAX
         case ctu::log2(sizeof(char)):
@@ -216,7 +216,7 @@ size_t log_integer(integer_data* msg) {
     return sizeof(integer_data);
 }
 
-size_t log_float(float_data* msg) {
+size_t log_float(const float_data* msg) {
     switch (msg->attributes.length_log2) {
 #if FLT_MANT_DIG < DBL_MANT_DIG
         case ctu::log2(sizeof(float)):
@@ -251,13 +251,13 @@ size_t log_float(float_data* msg) {
     return sizeof(float_data);
 }
 
-size_t log_std_string(std_string_data* msg) {
+size_t log_std_string(const std_string_data* msg) {
     std::cout << msg->string;
     msg->~std_string_data();
     return sizeof(std_string_data);
 }
 
-size_t log_string_literal(string_literal_data* msg) {
+size_t log_string_literal(const string_literal_data* msg) {
     if (msg->length == msg->UNKNOWN_LENGTH) {
         std::cout.write(msg->address, std::strlen(msg->address));
     } else {
@@ -267,8 +267,8 @@ size_t log_string_literal(string_literal_data* msg) {
     return sizeof(string_literal_data);
 }
 
-size_t log_segment(void* data) {
-    segment_data* s = static_cast<segment_data*>(data);
+size_t log_segment(const void* data) {
+    const segment_data* s = static_cast<const segment_data*>(data);
     return s->log_func(s);
 }
 
@@ -292,8 +292,8 @@ void do_logging() {
             if (tbuf == nullptr)
                 continue;
 
-            auto consumed = tbuf->consume([&](void* storage, size_t length) {
-                line_start_data* line = static_cast<line_start_data*>(storage);
+            auto consumed = tbuf->consume([&](const void* storage, size_t length) {
+                const line_start_data* line = static_cast<const line_start_data*>(storage);
 
                 if (line->timepoint == SHUTDOWN_SENTINEL_VALUE) {
                     shutdown_requested = true;
@@ -305,7 +305,7 @@ void do_logging() {
 
                     line->~line_start_data();
 
-                    char* elem = static_cast<char*>(storage) + sizeof(line_start_data);
+                    const char* elem = static_cast<const char*>(storage) + sizeof(line_start_data);
                     size_t offset = 0;
                     while (offset < line_length) {
                         offset += log_segment(elem + offset);

@@ -8,9 +8,9 @@
 
 template<
     int _buffer_size_log2,
+    int _content_align_log2 = ctu::log2_v<sizeof(void*)>,
     int _align_log2 = 6,
-    typename _difference_type = ptrdiff_t,
-    int _content_align_log2 = ctu::log2_v<sizeof(_difference_type)>
+    typename _difference_type = ptrdiff_t
 >
 struct alignas(size_t(1) << _align_log2) spsc_ring_buffer {
     using difference_type = _difference_type;
@@ -55,7 +55,7 @@ struct alignas(size_t(1) << _align_log2) spsc_ring_buffer {
     }
 
     template<typename cbtype>
-    bool consume(cbtype callback) noexcept(noexcept(callback(static_cast<void*>(nullptr), difference_type(0)))) {
+    bool consume(cbtype callback) noexcept(noexcept(callback(static_cast<const void*>(nullptr), difference_type(0)))) {
         auto consume_pos = _consume_pos.load(std::memory_order_acquire);
         auto produce_pos = _produce_pos.load(std::memory_order_acquire);
 
@@ -70,7 +70,7 @@ struct alignas(size_t(1) << _align_log2) spsc_ring_buffer {
             memcpy(&length, _buffer + (consume_pos & mask), sizeof(length));
         }
 
-        if (callback(static_cast<void*>(_buffer + (consume_pos & mask) + sizeof(difference_type)), length)) {
+        if (callback(static_cast<const void*>(_buffer + (consume_pos & mask) + sizeof(difference_type)), length)) {
             auto rounded_length = ctu::round_up_bits(length + sizeof(difference_type), content_align_log2);
             _consume_pos.store(consume_pos + rounded_length, std::memory_order_release);
             return true;
@@ -81,7 +81,7 @@ struct alignas(size_t(1) << _align_log2) spsc_ring_buffer {
 
     // returns true if buffer is empty after this call
     template<typename cbtype>
-    bool consume_all(cbtype callback) noexcept(noexcept(callback(static_cast<void*>(nullptr), difference_type(0)))) {
+    bool consume_all(cbtype callback) noexcept(noexcept(callback(static_cast<const void*>(nullptr), difference_type(0)))) {
         auto consume_pos = _consume_pos.load(std::memory_order_acquire);
         auto produce_pos = _produce_pos.load(std::memory_order_acquire);
 
@@ -102,7 +102,7 @@ struct alignas(size_t(1) << _align_log2) spsc_ring_buffer {
                     memcpy(&length, _buffer + (consume_pos & mask), sizeof(length));
                 }
 
-                if (callback(static_cast<void*>(_buffer + (consume_pos & mask) + sizeof(difference_type)), length) == false) {
+                if (callback(static_cast<const void*>(_buffer + (consume_pos & mask) + sizeof(difference_type)), length) == false) {
                     return false;
                 }
 
@@ -129,4 +129,4 @@ private:
     alignas(align) std::atomic<size_t> _consume_pos = 0;
 };
 
-static_assert(sizeof(spsc_ring_buffer<7, 6>) == 256);
+static_assert(sizeof(spsc_ring_buffer<7>) == 256);

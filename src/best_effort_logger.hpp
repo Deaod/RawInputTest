@@ -60,12 +60,12 @@ struct line_start_data {
 };
 
 struct segment_data {
-    using log_func_signature = size_t(segment_data*);
+    using log_func_signature = size_t(const segment_data*);
     log_func_signature* log_func;
 
     template<typename R, typename A1>
     explicit segment_data(
-        R(*log_func)(A1*),
+        R(*log_func)(const A1*),
         std::enable_if_t<
             std::is_same_v<size_t, R> && std::is_base_of_v<segment_data, A1>
         >* = nullptr
@@ -132,7 +132,7 @@ static bool log(types&&... msgs) {
 
 //////////////////////////////////////////////////////////////////////////
 
-size_t log_string_literal(struct string_literal_data*);
+size_t log_string_literal(const struct string_literal_data*);
 struct string_literal_data : segment_data {
     const char* address;
     size_t length;
@@ -176,7 +176,7 @@ BELOG_SEGMENT_FORWARD(const char*&&, const char*);
 
 //////////////////////////////////////////////////////////////////////////
 
-size_t log_std_string(struct std_string_data*);
+size_t log_std_string(const struct std_string_data*);
 struct std_string_data : segment_data {
     std::string string;
 
@@ -259,7 +259,7 @@ union integer_attributes {
     }
 };
 
-size_t log_integer(struct integer_data*);
+size_t log_integer(const struct integer_data*);
 struct integer_data : segment_data {
     integer_attributes attributes;
     char msg[sizeof(long long)];
@@ -385,7 +385,7 @@ union float_attributes {
         all_bits(initval) {}
 };
 
-size_t log_float(struct float_data*);
+size_t log_float(const struct float_data*);
 struct float_data : segment_data {
     float_attributes attributes;
     char msg[sizeof(long double)];
