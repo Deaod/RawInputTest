@@ -18,6 +18,7 @@
 #include "spsc_queue.hpp"
 #include "cpuid.hpp"
 #include "simd_primitives.hpp"
+#include "threads.hpp"
 #include <utility>
 
 #include <vulkan/vulkan.h>

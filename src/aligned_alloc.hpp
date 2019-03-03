@@ -30,3 +30,11 @@ inline void aligned_free(void* ptr) {
 }
 
 #endif
+
+// For use with std::unique_ptr as deleter
+struct aligned_free_deleter {
+    void operator()(void* ptr) {
+        aligned_free(ptr);
+    }
+};
+

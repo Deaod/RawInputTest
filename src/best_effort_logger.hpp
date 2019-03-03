@@ -25,17 +25,14 @@ void emergency_shutdown();
 
 } // namespace belog
 
-#include <cstdlib>
-#include <climits>
-#include <string>
-#include <array>
+#include <algorithm>
 #include <atomic>
+#include <string>
 
 #include "bitfield.hpp"
-#include "cpuid.hpp"
 #include "compile_time_utilities.hpp"
+#include "cpuid.hpp"
 #include "spsc_ring_buffer.hpp"
-#include "threads.hpp"
 
 namespace belog {
 

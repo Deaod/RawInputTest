@@ -1,12 +1,15 @@
 #include "best_effort_logger.hpp"
 
+#include <array>
 #include <chrono>
+#include <cstdlib>
 #include <iostream>
 #include <iomanip>
 #include <sstream>
 #include <thread>
 #include "aligned_alloc.hpp"
 #include "bitmanip.hpp"
+#include "threads.hpp"
 
 namespace belog {
 
